@@ -1,0 +1,180 @@
+import { Product, Category, NewsArticle, GlobalSiteSettings } from '../types';
+
+export const initialProduct: Product = {
+  id: 'prod_news_daily',
+  name: 'Curated Daily Intelligence',
+  slug: 'curated-daily-intelligence',
+  description: 'Hand-curated executive briefings on India PE/VC & Startups and Healthcare, synchronized daily between 6:00 AM and 7:00 AM IST.',
+  type: 'news_subscription',
+  isActive: true,
+  trialDays: 3,
+  basePriceInr: 252.00,
+  gstRatePercent: 18,
+  billingPeriod: 'yearly',
+};
+
+export const futureProducts: Product[] = [
+  {
+    id: 'prod_audiobooks',
+    name: 'Executive Audiobooks & Summaries',
+    slug: 'executive-audiobooks',
+    description: 'Bite-sized business audio briefings and high-impact executive management book summaries.',
+    type: 'audiobook',
+    isActive: false,
+    trialDays: 7,
+    basePriceInr: 499.00,
+    gstRatePercent: 18,
+    billingPeriod: 'yearly',
+  },
+  {
+    id: 'prod_reports',
+    name: 'Quarterly Industry Dossiers & E-Books',
+    slug: 'quarterly-industry-reports',
+    description: 'Deep-dive analysis documents and downloadable Indian PE/VC & Healthcare intelligence dossiers.',
+    type: 'ebook',
+    isActive: false,
+    trialDays: 0,
+    basePriceInr: 799.00,
+    gstRatePercent: 18,
+    billingPeriod: 'yearly',
+  },
+  {
+    id: 'prod_magazine',
+    name: 'Indian Private Capital Magazine',
+    slug: 'capital-magazine',
+    description: 'Digital monthly magazine covering institutional capital, family offices, and cross-border M&A in India.',
+    type: 'magazine',
+    isActive: false,
+    trialDays: 3,
+    basePriceInr: 399.00,
+    gstRatePercent: 18,
+    billingPeriod: 'yearly',
+  },
+];
+
+export const initialCategories: Category[] = [
+  {
+    id: 'cat_india_pe_vc',
+    productId: 'prod_news_daily',
+    name: 'India PE/VC & Startups',
+    slug: 'india-pe-vc-startups',
+    description: 'Venture funding rounds, growth equity, IPO pipeline, and tech ecosystem deals in India.',
+    isActive: true,
+    displayOrder: 1,
+  },
+  {
+    id: 'cat_india_healthcare',
+    productId: 'prod_news_daily',
+    name: 'India Healthcare',
+    slug: 'india-healthcare',
+    description: 'Pharma manufacturing, hospital expansion, medtech investments, and regulatory updates in India.',
+    isActive: true,
+    displayOrder: 2,
+  },
+];
+
+export const initialNewsArticles: NewsArticle[] = [
+  {
+    id: 'news_pe_1',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_pe_vc',
+    categoryName: 'India PE/VC & Startups',
+    headline: 'Indian DeepTech & Enterprise SaaS Startups Raise $380M in Early-Stage Equity This Week',
+    summary: 'Growth stage capital in Bengaluru and NCR saw resurgence with lead investments from sovereign funds targeting AI hardware infrastructure and domestic supply chain intelligence software.',
+    date: '2026-09-18',
+    sourceName: 'Venture Intelligence Daily',
+    sourceUrl: 'https://example.com/india-deeptech-funding-rebound',
+    createdAt: '2026-09-18T06:15:00Z',
+  },
+  {
+    id: 'news_pe_2',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_pe_vc',
+    categoryName: 'India PE/VC & Startups',
+    headline: 'SEBI Streamlines Fast-Track IPO Filings for Profitable Tech Unicorns',
+    summary: 'New regulatory guidelines reduce processing timelines by 45 days for profitable domestic startups looking to list on NSE/BSE, encouraging institutional PE exits within India.',
+    date: '2026-09-18',
+    sourceName: 'LiveMint Deals & Markets',
+    sourceUrl: 'https://example.com/sebi-tech-unicorn-ipo-norms',
+    createdAt: '2026-09-18T06:35:00Z',
+  },
+  {
+    id: 'news_pe_3',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_pe_vc',
+    categoryName: 'India PE/VC & Startups',
+    headline: 'Global Sovereign Wealth Funds Allocate $1.2B Dedicated Co-Investment Pool for Indian Infrastructure',
+    summary: 'Institutional LP commitments expanded for Indian digital infrastructure, hyperscale data centres, and logistics parks with anticipated domestic returns exceeding 14% IRR.',
+    date: '2026-09-18',
+    sourceName: 'The Economic Times Private Equity',
+    sourceUrl: 'https://example.com/sovereign-wealth-fund-india-pool',
+    createdAt: '2026-09-18T06:50:00Z',
+  },
+  {
+    id: 'news_hc_1',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_healthcare',
+    categoryName: 'India Healthcare',
+    headline: 'Tier-2 Hospital Chains Secure $150M PE Expansion Facilities for Oncology Wings',
+    summary: 'Consolidation heats up across western and southern regional healthcare providers, with major funds backing specialized cancer care and robotic surgery infrastructure in non-metro hubs.',
+    date: '2026-09-18',
+    sourceName: 'Healthcare Executive India',
+    sourceUrl: 'https://example.com/tier2-hospital-pe-expansion',
+    createdAt: '2026-09-18T06:20:00Z',
+  },
+  {
+    id: 'news_hc_2',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_healthcare',
+    categoryName: 'India Healthcare',
+    headline: 'CDSCO Approves Indigenous Biosimilar for Rheumatoid Arthritis With 40% Cost Advantage',
+    summary: 'Domestic pharma manufacturer clears Phase III safety verification, promising affordable biological treatments across tertiary public and private hospital networks in India.',
+    date: '2026-09-18',
+    sourceName: 'PharmaBiz Bureau',
+    sourceUrl: 'https://example.com/cdsco-indigenous-biosimilar-nod',
+    createdAt: '2026-09-18T06:40:00Z',
+  },
+  {
+    id: 'news_hc_3',
+    productId: 'prod_news_daily',
+    categoryId: 'cat_india_healthcare',
+    categoryName: 'India Healthcare',
+    headline: 'MedTech PLI Scheme Triggers $320M Domestic Manufacturing Inflow for Diagnostic Imaging',
+    summary: 'India’s production-linked incentive scheme attracts joint ventures for indigenous MRI components and digital X-ray sensors, reducing import reliance across corporate hospital networks.',
+    date: '2026-09-18',
+    sourceName: 'Indian Medical Device Monitor',
+    sourceUrl: 'https://example.com/medtech-pli-domestic-manufacturing',
+    createdAt: '2026-09-18T06:58:00Z',
+  },
+];
+
+export const initialSiteSettings: GlobalSiteSettings = {
+  siteTitle: 'mydigitalasset.com',
+  tagline: 'Curated Daily Intelligence for India',
+  supportEmail: 'tmkrealty@gmail.com',
+  restrictedCountry: 'IN',
+  allowInternational: false,
+  adsense: {
+    isEnabled: false, // Default is OFF as requested
+    publisherId: 'ca-pub-XXXXXXXXXXXXX',
+    placements: {
+      homepageBanner: false,
+      inFeedSeparator: true,
+      footerBanner: false,
+    },
+  },
+  payment: {
+    providerType: 'manual_upi',
+    upiId: '7021923124@upi',
+    beneficiaryName: 'Mihir Kapuria',
+    phoneNumber: '7021923124',
+    gstCreditEmail: 'tmkrealty@gmail.com',
+  },
+  security: {
+    adminEmail: 'mihirkapuria@gmail.com',
+    allowedIpAddresses: [
+      '2409:40c0:1075:e02e:4463:f855:15b3:1957', // IPv6
+      '152.58.44.11', // IPv4
+    ],
+  },
+};

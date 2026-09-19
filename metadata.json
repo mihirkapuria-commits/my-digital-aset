@@ -1,0 +1,6 @@
+{
+  "name": "MyDigitalAsset",
+  "description": "Paid daily news subscription service for customers in India covering India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified international and domestic sources.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
