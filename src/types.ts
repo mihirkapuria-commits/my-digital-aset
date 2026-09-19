@@ -95,7 +95,8 @@ export interface AdSenseConfiguration {
 
 export interface AdminSecuritySettings {
   adminEmail: string;
-  allowedIpAddresses: string[]; // IPv4 and IPv6 addresses allowed to access /admin
+  ipRestrictionsEnabled?: boolean;
+  allowedIpAddresses?: string[];
 }
 
 export interface GlobalSiteSettings {

@@ -5,7 +5,8 @@ import {
   Check, 
   Settings, 
   DollarSign, 
-  ShieldAlert, 
+  ShieldCheck,
+  Globe, 
   Tv, 
   ListPlus, 
   Users, 
@@ -61,9 +62,8 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
   const [slotHomepage, setSlotHomepage] = useState(settings.adsense.placements.homepageBanner);
   const [slotFooter, setSlotFooter] = useState(settings.adsense.placements.footerBanner);
 
-  // Local state for IP allowlist
-  const [ipAddresses, setIpAddresses] = useState(settings.security.allowedIpAddresses);
-  const [newIpInput, setNewIpInput] = useState('');
+  // Local state for Admin Security & Notifications
+  const [adminEmail, setAdminEmail] = useState(settings.security.adminEmail);
 
   // Category new input
   const [newCatName, setNewCatName] = useState('');
@@ -82,7 +82,7 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
       setSlotInFeed(settings.adsense.placements.inFeedSeparator);
       setSlotHomepage(settings.adsense.placements.homepageBanner);
       setSlotFooter(settings.adsense.placements.footerBanner);
-      setIpAddresses(settings.security.allowedIpAddresses);
+      setAdminEmail(settings.security.adminEmail);
     }
   }, [isOpen, product, settings]);
 
@@ -132,24 +132,14 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
       },
       security: {
         ...settings.security,
-        allowedIpAddresses: ipAddresses,
+        adminEmail: adminEmail.trim(),
+        ipRestrictionsEnabled: false,
       },
     };
     onUpdateSettings(updatedSettings);
 
     setSavedNotice(true);
     setTimeout(() => setSavedNotice(false), 2500);
-  };
-
-  const handleAddIp = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newIpInput.trim() || ipAddresses.includes(newIpInput.trim())) return;
-    setIpAddresses([...ipAddresses, newIpInput.trim()]);
-    setNewIpInput('');
-  };
-
-  const handleRemoveIp = (ip: string) => {
-    setIpAddresses(ipAddresses.filter((i) => i !== ip));
   };
 
   const handleAddCategory = (e: React.FormEvent) => {
@@ -199,12 +189,13 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold font-serif">Admin Control Panel</h2>
-                <span className="text-[10px] bg-amber-500/20 text-amber-400 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
-                  IP Verified: 152.58.44.11
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/30 font-medium flex items-center gap-1">
+                  <Globe className="w-2.5 h-2.5" />
+                  Unrestricted Network Access
                 </span>
               </div>
               <p className="text-xs text-stone-400">
-                Admin: <span className="text-stone-200">{settings.security.adminEmail}</span> (No passwords hard-coded)
+                Admin: <span className="text-stone-200">{settings.security.adminEmail}</span> (All IP restrictions removed)
               </p>
             </div>
           </div>
@@ -254,8 +245,8 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
                 : 'border-transparent text-stone-600 hover:text-stone-900'
             }`}
           >
-            <ShieldAlert className="w-3.5 h-3.5 text-amber-600" />
-            <span>IP Security Shield</span>
+            <ShieldCheck className="w-3.5 h-3.5 text-amber-600" />
+            <span>Admin Security & Access</span>
           </button>
 
           <button
@@ -477,69 +468,46 @@ export const AdminPreviewModal: React.FC<AdminPreviewModalProps> = ({
             </div>
           )}
 
-          {/* TAB 3: IP SECURITY SHIELD */}
+          {/* TAB 3: ADMIN SECURITY & ACCESS */}
           {activeTab === 'security' && (
             <div className="space-y-4">
-              <div className="bg-stone-900 text-white p-4 rounded-xl space-y-2">
-                <div className="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
-                  <ShieldAlert className="w-4 h-4" /> Server-Side IP Protection Layer
+              <div className="bg-stone-900 text-white p-4 sm:p-5 rounded-xl space-y-2.5">
+                <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs uppercase tracking-wider">
+                  <ShieldCheck className="w-4 h-4" /> Global Unrestricted Admin Access
                 </div>
                 <p className="text-xs text-stone-300 leading-relaxed">
-                  Only connections matching these approved IP addresses can view or access the Admin login portal. If you connect from a different Wi-Fi or mobile network, add your new IP address below.
+                  All IP-related restrictions and IP allowlists have been completely removed. You can now access and manage the Admin Control Panel freely from any Wi-Fi, broadband, cellular network, or device without IP address barriers.
                 </p>
-              </div>
-
-              <div>
-                <h4 className="font-bold text-xs uppercase tracking-wider text-stone-700 mb-2">
-                  Approved Admin IP Addresses
-                </h4>
-                <div className="space-y-2">
-                  {ipAddresses.map((ip) => (
-                    <div
-                      key={ip}
-                      className="flex items-center justify-between p-3 rounded-xl border border-stone-200 bg-stone-50 font-mono text-xs"
-                    >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                        <span className="font-semibold text-stone-800">{ip}</span>
-                        {ip.includes(':') ? (
-                          <span className="text-[10px] bg-stone-200 text-stone-700 px-1.5 py-0.5 rounded font-sans">IPv6</span>
-                        ) : (
-                          <span className="text-[10px] bg-stone-200 text-stone-700 px-1.5 py-0.5 rounded font-sans">IPv4</span>
-                        )}
-                      </div>
-
-                      {ipAddresses.length > 1 && (
-                        <button
-                          onClick={() => handleRemoveIp(ip)}
-                          className="text-stone-400 hover:text-rose-600 p-1 transition"
-                          title="Remove IP"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <span className="text-[11px] bg-emerald-950 text-emerald-300 border border-emerald-700/60 px-2 py-0.5 rounded font-mono">
+                    Status: IP Restrictions Disabled
+                  </span>
+                  <span className="text-[11px] bg-stone-800 text-stone-300 border border-stone-700 px-2 py-0.5 rounded font-mono">
+                    Allowed Networks: All (0.0.0.0/0, ::/0)
+                  </span>
                 </div>
               </div>
 
-              {/* Add New IP Form */}
-              <form onSubmit={handleAddIp} className="flex gap-2 pt-2">
-                <input
-                  type="text"
-                  placeholder="Enter new IPv4 or IPv6 address..."
-                  value={newIpInput}
-                  onChange={(e) => setNewIpInput(e.target.value)}
-                  className="flex-1 bg-stone-50 border border-stone-300 rounded-lg px-3 py-2 text-xs font-mono focus:border-stone-800 focus:bg-white outline-hidden"
-                />
-                <button
-                  type="submit"
-                  className="bg-stone-900 hover:bg-stone-800 text-white px-3.5 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Allow IP</span>
-                </button>
-              </form>
+              <div className="bg-white p-4 rounded-xl border border-stone-200 space-y-3">
+                <h4 className="font-bold text-xs uppercase tracking-wider text-stone-700">
+                  Administrator Contact & Notification Email
+                </h4>
+                <p className="text-xs text-stone-500">
+                  Receipts, subscription notifications, and administrator messages are delivered to this email address.
+                </p>
+                <div>
+                  <label className="block text-xs font-semibold text-stone-700 mb-1">
+                    Primary Admin Email Address
+                  </label>
+                  <input
+                    type="email"
+                    value={adminEmail}
+                    onChange={(e) => setAdminEmail(e.target.value)}
+                    className="w-full bg-stone-50 border border-stone-300 rounded-lg px-3 py-2 text-xs font-medium focus:border-stone-800 focus:bg-white outline-hidden"
+                    placeholder="admin@example.com"
+                  />
+                </div>
+              </div>
             </div>
           )}
 

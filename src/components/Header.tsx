@@ -72,7 +72,7 @@ export const Header: React.FC<HeaderProps> = ({
               id="header-admin-btn"
               onClick={onOpenAdmin}
               className="flex items-center gap-1 text-[11px] bg-stone-800 hover:bg-stone-700 text-stone-200 px-2.5 py-1 rounded font-medium border border-stone-700 transition"
-              title="Admin Panel (Protected by IP Allowlist)"
+              title="Admin Control Panel"
             >
               <Settings className="w-3 h-3 text-amber-400" />
               <span>Admin Panel</span>

@@ -172,9 +172,6 @@ export const initialSiteSettings: GlobalSiteSettings = {
   },
   security: {
     adminEmail: 'mihirkapuria@gmail.com',
-    allowedIpAddresses: [
-      '2409:40c0:1075:e02e:4463:f855:15b3:1957', // IPv6
-      '152.58.44.11', // IPv4
-    ],
+    ipRestrictionsEnabled: false,
   },
 };
