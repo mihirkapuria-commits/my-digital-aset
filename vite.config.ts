@@ -5,6 +5,7 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    base: '/my-digital-aset/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
