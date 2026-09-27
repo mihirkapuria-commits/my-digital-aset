@@ -1,20 +1,19 @@
 import React from 'react';
-import { Mail, Shield, Globe } from 'lucide-react';
+import { Mail, Globe } from 'lucide-react';
 import { GlobalSiteSettings, Product } from '../types';
 import { AdSenseSlot } from './AdSenseSlot';
+import { Logo } from './Logo';
 
 interface FooterProps {
   settings: GlobalSiteSettings;
   product: Product;
   onOpenPaywall: () => void;
-  onOpenAdmin: () => void;
 }
 
 export const Footer: React.FC<FooterProps> = ({
   settings,
   product,
   onOpenPaywall,
-  onOpenAdmin,
 }) => {
   const gstAmount = Number(((product.basePriceInr * product.gstRatePercent) / 100).toFixed(2));
   const totalAmount = (product.basePriceInr + gstAmount).toFixed(2);
@@ -30,9 +29,7 @@ export const Footer: React.FC<FooterProps> = ({
         <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
           {/* Brand Column */}
           <div className="space-y-3">
-            <h3 className="text-lg font-bold font-serif text-white tracking-tight">
-              mydigitalasset<span className="text-amber-500">.com</span>
-            </h3>
+            <Logo size="sm" theme="dark" showBadge={false} />
             <p className="text-xs text-stone-400 leading-relaxed max-w-sm">
               High-value, distraction-free daily intelligence curated specifically for decision-makers and investors across India.
             </p>
@@ -79,7 +76,7 @@ export const Footer: React.FC<FooterProps> = ({
               For tax invoice requests and GST input credit verification, please write to:
             </p>
             <a
-              href={`mailto:${settings.payment.gstCreditEmail}?subject=GST%20Input%20Credit%20Inquiry%20-%20mydigitalasset.com`}
+              href={`mailto:${settings.payment.gstCreditEmail}?subject=GST%20Input%20Credit%20Inquiry%20-%20mydigitasset.com`}
               className="inline-flex items-center gap-1.5 text-amber-400 hover:text-amber-300 font-medium"
             >
               <Mail className="w-3.5 h-3.5" />
@@ -93,21 +90,13 @@ export const Footer: React.FC<FooterProps> = ({
 
         {/* Bottom Bar */}
         <div className="mt-8 pt-6 border-t border-stone-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-stone-400">
-          <p>© {new Date().getFullYear()} mydigitalasset.com. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} mydigitasset.com. All rights reserved.</p>
           <div className="flex items-center gap-4">
             <button
               onClick={onOpenPaywall}
               className="hover:text-stone-300 transition"
             >
               Subscription Details
-            </button>
-            <span>•</span>
-            <button
-              onClick={onOpenAdmin}
-              className="hover:text-amber-400 flex items-center gap-1 transition"
-            >
-              <Shield className="w-3 h-3" />
-              <span>Owner Access</span>
             </button>
           </div>
         </div>

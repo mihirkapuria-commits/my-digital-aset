@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Check, Copy, ShieldCheck, Mail, Smartphone, ArrowRight, ArrowLeft } from 'lucide-react';
 import { Product, PaymentConfiguration } from '../types';
+import { Logo } from './Logo';
 
 interface PaywallModalProps {
   isOpen: boolean;
@@ -93,12 +94,12 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             <X className="w-4 h-4" />
           </button>
 
-          <div className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400 bg-stone-800 px-2.5 py-1 rounded-full mb-2.5">
-            <ShieldCheck className="w-3.5 h-3.5" /> 1-Year Full Subscription
+          <div className="mb-2">
+            <Logo size="sm" theme="dark" showBadge={false} />
           </div>
-          <h2 className="text-xl sm:text-2xl font-bold font-serif tracking-tight pr-16">
-            mydigitalasset.com
-          </h2>
+          <div className="inline-flex items-center gap-1 text-xs font-semibold text-amber-400 bg-stone-800 px-2.5 py-1 rounded-full mb-2">
+            <ShieldCheck className="w-3.5 h-3.5" /> 1-Year Full Subscription Access
+          </div>
           <p className="text-xs sm:text-sm text-stone-300 mt-1">
             Curated daily intelligence across India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified sources.
           </p>
@@ -212,7 +213,7 @@ export const PaywallModal: React.FC<PaywallModalProps> = ({
             <p className="text-stone-600 leading-relaxed text-[11px]">
               Customers claiming GST input credit should email{' '}
               <a
-                href={`mailto:${paymentConfig.gstCreditEmail}?subject=GST%20Input%20Credit%20Request%20-%20mydigitalasset.com`}
+                href={`mailto:${paymentConfig.gstCreditEmail}?subject=GST%20Input%20Credit%20Request%20-%20mydigitasset.com`}
                 className="font-semibold text-stone-900 underline underline-offset-2 hover:text-amber-700"
               >
                 {paymentConfig.gstCreditEmail}

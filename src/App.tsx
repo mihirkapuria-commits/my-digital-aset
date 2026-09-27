@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { 
   initialProduct, 
   initialCategories, 
@@ -12,7 +12,7 @@ import { FreeTrialBanner } from './components/FreeTrialBanner';
 import { NewsCard } from './components/NewsCard';
 import { AdSenseSlot } from './components/AdSenseSlot';
 import { PaywallModal } from './components/PaywallModal';
-import { AdminPreviewModal } from './components/AdminPreviewModal';
+import { AdminPortal } from './components/AdminPortal';
 import { Footer } from './components/Footer';
 import { Newspaper, Sparkles, Filter } from 'lucide-react';
 
@@ -25,7 +25,33 @@ export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userState, setUserState] = useState<'trial' | 'expired' | 'subscribed'>('trial');
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
-  const [isAdminOpen, setIsAdminOpen] = useState(false);
+
+  // Check whether current URL is private Admin path (/admin)
+  const [isAdminPath, setIsAdminPath] = useState<boolean>(() => {
+    return window.location.pathname.startsWith('/admin');
+  });
+
+  // Listen for browser navigation / popstate
+  useEffect(() => {
+    const handleLocationChange = () => {
+      setIsAdminPath(window.location.pathname.startsWith('/admin'));
+    };
+
+    window.addEventListener('popstate', handleLocationChange);
+    return () => window.removeEventListener('popstate', handleLocationChange);
+  }, []);
+
+  // Fetch persisted settings from server
+  useEffect(() => {
+    fetch('/api/site-settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.settings) {
+          setSettings((prev) => ({ ...prev, ...data.settings }));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Filtered articles based on selected category tab
   const filteredArticles = useMemo(() => {
@@ -48,23 +74,42 @@ export default function App() {
   }, [categories, selectedCategoryId]);
 
   const handlePaymentSubmitted = (txnRef: string) => {
-    // When user submits UTR in demo, switch them to subscribed mode
     setUserState('subscribed');
   };
 
+  // If navigating directly to private Admin URL
+  if (isAdminPath) {
+    return (
+      <AdminPortal
+        settings={settings}
+        onUpdateSettings={setSettings}
+        product={product}
+        onUpdateProduct={setProduct}
+        categories={categories}
+        onUpdateCategories={setCategories}
+        onExitAdmin={() => {
+          window.history.pushState({}, '', '/');
+          setIsAdminPath(false);
+        }}
+      />
+    );
+  }
+
+  // ====================================================
+  // PUBLIC WEBSITE (NO Admin buttons, menus, or links)
+  // ====================================================
   return (
     <div className="min-h-screen flex flex-col bg-stone-100/60 font-sans text-stone-900 selection:bg-amber-100 selection:text-amber-900">
-      {/* 1. Header with branding, edition badge, and interactive preview switcher */}
+      {/* 1. Public Header with branding and edition badge */}
       <Header
         settings={settings}
         product={product}
         userState={userState}
         setUserState={setUserState}
         onOpenPaywall={() => setIsPaywallOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
-      {/* 2. Category Tab Navigation (Horizontal Mobile-Scroll) */}
+      {/* 2. Category Tab Navigation */}
       <CategoryFilter
         categories={categories}
         selectedCategoryId={selectedCategoryId}
@@ -74,7 +119,7 @@ export default function App() {
 
       {/* 3. Main Content Container */}
       <main className="flex-1 max-w-5xl w-full mx-auto px-4 py-6 sm:py-8">
-        {/* Optional Homepage AdSense Banner (Only renders if AdSense is ON in Admin settings) */}
+        {/* Optional Homepage AdSense Banner */}
         <AdSenseSlot
           config={settings.adsense}
           placement="homepageBanner"
@@ -116,7 +161,7 @@ export default function App() {
             <p className="text-xs text-stone-500 mt-1">Select another category or view all briefings.</p>
             <button
               onClick={() => setSelectedCategoryId(null)}
-              className="mt-4 text-xs font-semibold text-amber-700 hover:text-amber-800 underline underline-offset-2"
+              className="mt-4 text-xs font-semibold text-amber-700 hover:text-amber-800 underline underline-offset-2 cursor-pointer"
             >
               View All Categories
             </button>
@@ -124,7 +169,6 @@ export default function App() {
         ) : (
           <div className="space-y-4 sm:space-y-5">
             {filteredArticles.map((article, index) => {
-              // Insert an optional In-Feed AdSense separator after the 2nd article if AdSense is enabled
               const showInFeedAd = index === 1;
 
               return (
@@ -148,7 +192,7 @@ export default function App() {
           </div>
         )}
 
-        {/* Subscribed or Trial Reader reassurance note */}
+        {/* Synchronization reassurance note */}
         <div className="mt-8 text-center bg-white border border-stone-200 rounded-xl p-4 sm:p-5">
           <div className="flex items-center justify-center gap-1.5 text-xs font-semibold text-stone-800">
             <Sparkles className="w-3.5 h-3.5 text-amber-600" />
@@ -160,12 +204,11 @@ export default function App() {
         </div>
       </main>
 
-      {/* 4. Footer */}
+      {/* 4. Public Footer (No Admin options or owner links) */}
       <Footer
         settings={settings}
         product={product}
         onOpenPaywall={() => setIsPaywallOpen(true)}
-        onOpenAdmin={() => setIsAdminOpen(true)}
       />
 
       {/* 5. Paywall / Checkout Modal */}
@@ -175,18 +218,6 @@ export default function App() {
         product={product}
         paymentConfig={settings.payment}
         onPaymentSubmitted={handlePaymentSubmitted}
-      />
-
-      {/* 6. Admin Preview & Control Panel Modal */}
-      <AdminPreviewModal
-        isOpen={isAdminOpen}
-        onClose={() => setIsAdminOpen(false)}
-        settings={settings}
-        onUpdateSettings={setSettings}
-        product={product}
-        onUpdateProduct={setProduct}
-        categories={categories}
-        onUpdateCategories={setCategories}
       />
     </div>
   );

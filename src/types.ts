@@ -1,5 +1,5 @@
 /**
- * Core Data Models & Extensible Architecture for mydigitalasset.com
+ * Core Data Models & Extensible Architecture for mydigitasset.com
  * Supports multi-product digital assets (News, Audiobooks, E-books, Magazines, AI services)
  */
 

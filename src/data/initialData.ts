@@ -149,7 +149,7 @@ export const initialNewsArticles: NewsArticle[] = [
 ];
 
 export const initialSiteSettings: GlobalSiteSettings = {
-  siteTitle: 'mydigitalasset.com',
+  siteTitle: 'mydigitasset.com',
   tagline: 'Curated Daily Intelligence for India',
   supportEmail: 'tmkrealty@gmail.com',
   restrictedCountry: 'IN',

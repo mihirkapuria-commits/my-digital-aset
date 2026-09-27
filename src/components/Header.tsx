@@ -1,6 +1,7 @@
 import React from 'react';
-import { ShieldCheck, Sparkles, User, Settings, Globe } from 'lucide-react';
+import { ShieldCheck, Sparkles, User, Globe } from 'lucide-react';
 import { GlobalSiteSettings, Product } from '../types';
+import { Logo } from './Logo';
 
 interface HeaderProps {
   settings: GlobalSiteSettings;
@@ -8,7 +9,6 @@ interface HeaderProps {
   userState: 'trial' | 'expired' | 'subscribed';
   setUserState: (state: 'trial' | 'expired' | 'subscribed') => void;
   onOpenPaywall: () => void;
-  onOpenAdmin: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,14 +17,13 @@ export const Header: React.FC<HeaderProps> = ({
   userState,
   setUserState,
   onOpenPaywall,
-  onOpenAdmin,
 }) => {
   const gstAmount = Number(((product.basePriceInr * product.gstRatePercent) / 100).toFixed(2));
   const totalAmount = (product.basePriceInr + gstAmount).toFixed(2);
 
   return (
     <header id="main-header" className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-stone-200">
-      {/* Top Utility Strip: Market Edition & User Status Switcher */}
+      {/* Top Utility Strip: Market Edition & Synchronization Schedule */}
       <div className="bg-stone-900 text-stone-200 text-xs py-1.5 px-4">
         <div className="max-w-5xl mx-auto flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-2">
@@ -35,48 +34,10 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="text-stone-300">Briefings Synchronized Daily 6:00 AM – 7:00 AM IST</span>
           </div>
 
-          <div className="flex items-center gap-3">
-            {/* View switcher to easily preview different user states */}
-            <div className="flex items-center gap-1 bg-stone-800 rounded px-2 py-0.5 border border-stone-700">
-              <span className="text-[11px] text-stone-400 hidden sm:inline">Preview Mode:</span>
-              <button
-                id="state-trial-btn"
-                onClick={() => setUserState('trial')}
-                className={`px-1.5 py-0.5 text-[11px] rounded font-medium transition ${
-                  userState === 'trial' ? 'bg-amber-500 text-stone-950' : 'text-stone-300 hover:text-white'
-                }`}
-              >
-                Trial (Day 1)
-              </button>
-              <button
-                id="state-expired-btn"
-                onClick={() => setUserState('expired')}
-                className={`px-1.5 py-0.5 text-[11px] rounded font-medium transition ${
-                  userState === 'expired' ? 'bg-rose-500 text-white' : 'text-stone-300 hover:text-white'
-                }`}
-              >
-                Trial Expired
-              </button>
-              <button
-                id="state-sub-btn"
-                onClick={() => setUserState('subscribed')}
-                className={`px-1.5 py-0.5 text-[11px] rounded font-medium transition ${
-                  userState === 'subscribed' ? 'bg-emerald-500 text-stone-950' : 'text-stone-300 hover:text-white'
-                }`}
-              >
-                Subscribed
-              </button>
-            </div>
-
-            <button
-              id="header-admin-btn"
-              onClick={onOpenAdmin}
-              className="flex items-center gap-1 text-[11px] bg-stone-800 hover:bg-stone-700 text-stone-200 px-2.5 py-1 rounded font-medium border border-stone-700 transition"
-              title="Admin Control Panel"
-            >
-              <Settings className="w-3 h-3 text-amber-400" />
-              <span>Admin Panel</span>
-            </button>
+          <div className="flex items-center gap-2 text-[11px] text-stone-400">
+            <span className="text-amber-400/90 font-medium">Verified Sources</span>
+            <span>•</span>
+            <span className="text-stone-300">PE/VC & Healthcare Intelligence</span>
           </div>
         </div>
       </div>
@@ -84,15 +45,10 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Main Brand & Action Nav */}
       <div className="max-w-5xl mx-auto px-4 py-3 sm:py-4 flex items-center justify-between">
         <div>
-          <a href="#" className="flex items-baseline gap-1.5 group">
-            <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-stone-900 font-serif">
-              mydigitalasset<span className="text-amber-600">.com</span>
-            </h1>
-            <span className="text-[11px] uppercase tracking-wider font-semibold text-stone-700 bg-stone-100 px-1.5 py-0.5 rounded border border-stone-200">
-              Daily News
-            </span>
+          <a href="#" className="inline-block group" aria-label="mydigitasset.com home">
+            <Logo size="md" theme="light" showBadge={true} />
           </a>
-          <p className="text-xs text-stone-700 mt-0.5">
+          <p className="text-xs text-stone-600 mt-1 pl-0.5 font-medium">
             {settings.tagline}
           </p>
         </div>
