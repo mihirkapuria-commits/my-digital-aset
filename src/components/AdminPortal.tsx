@@ -41,13 +41,10 @@ const AUTHORIZED_EMAIL = 'mihirkapuria@gmail.com';
 interface AdminPortalProps {
   settings: GlobalSiteSettings;
   onUpdateSettings: (s: GlobalSiteSettings) => void;
-
   product: Product;
   onUpdateProduct: (p: Product) => void;
-
   categories: Category[];
   onUpdateCategories: (c: Category[]) => void;
-
   onExitAdmin: () => void;
 }
 
@@ -58,10 +55,12 @@ interface AdminUser {
 }
 
 interface SecurityAuditLog {
-  id: string;
+  id?: string;
   timestamp: string;
-  eventType: string;
+  eventType?: string;
+  action?: string;
   email?: string;
+  adminEmail?: string;
   details: string;
 }
 
@@ -72,6 +71,7 @@ interface BackendResponse {
   user?: AdminUser;
   categories?: Category[];
   logs?: SecurityAuditLog[];
+  auditLog?: SecurityAuditLog[];
   settings?: GlobalSiteSettings;
   valid?: boolean;
   detectedType?: string;
@@ -161,7 +161,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
     useState(false);
 
   // ============================================================
-  // HELPER: CALL APPS SCRIPT BACKEND
+  // AUTHENTICATION CHECK
+  // ============================================================
+
+  const throwIfNotAuthenticated = () => {
+    if (!isAuthenticated) {
+      throw new Error(
+        'Administrator authentication is required.'
+      );
+    }
+  };
+
+  // ============================================================
+  // APPS SCRIPT BACKEND CALL
   // ============================================================
 
   const callBackend = async (
@@ -181,11 +193,10 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     const response = await fetch(APPS_SCRIPT_URL, {
       method: 'POST',
-
+      redirect: 'follow',
       headers: {
         'Content-Type': 'text/plain;charset=utf-8',
       },
-
       body: JSON.stringify({
         action,
         idToken: googleCredential,
@@ -204,19 +215,12 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
     if (!data.ok) {
       throw new Error(
-        data.error || 'The administrator request was rejected.'
+        data.error ||
+          'The administrator request was rejected.'
       );
     }
 
     return data;
-  };
-
-  const throwIfNotAuthenticated = () => {
-    if (!isAuthenticated) {
-      throw new Error(
-        'Administrator authentication is required.'
-      );
-    }
   };
 
   // ============================================================
@@ -255,32 +259,38 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               }
 
               // Store only for the current browser session.
-              // It is never written to localStorage.
+              // Never store the Google ID token in localStorage.
               sessionStorage.setItem(
                 'admin_google_id_token',
                 token
               );
 
-              // The Apps Script backend verifies:
-              // - Google token signature
+              // IMPORTANT:
+              // The Apps Script backend does not have a
+              // VERIFY_ADMIN action.
+              //
+              // GET_ADMIN_CATEGORIES is an authenticated
+              // backend action. The backend verifies:
+              //
+              // - Google ID token
               // - issuer
               // - audience
-              // - expiration
-              // - email
-              // - email_verified
+              // - email verification
               // - authorized administrator email
+              //
+              // Only after successful verification does
+              // the backend return the categories/audit data.
 
               const backendResponse =
                 await fetch(APPS_SCRIPT_URL, {
                   method: 'POST',
-
+                  redirect: 'follow',
                   headers: {
                     'Content-Type':
                       'text/plain;charset=utf-8',
                   },
-
                   body: JSON.stringify({
-                    action: 'VERIFY_ADMIN',
+                    action: 'GET_ADMIN_CATEGORIES',
                     idToken: token,
                   }),
                 });
@@ -309,13 +319,36 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 email:
                   data.user?.email ||
                   AUTHORIZED_EMAIL,
-
                 name:
                   data.user?.name,
-
                 picture:
                   data.user?.picture,
               };
+
+              // If the backend returned categories,
+              // synchronize them with the application.
+              if (data.categories) {
+                onUpdateCategories(data.categories);
+              }
+
+              // The backend currently calls this field auditLog.
+              if (data.auditLog) {
+                setAuditLogs(
+                  data.auditLog.map((log, index) => ({
+                    ...log,
+                    id:
+                      log.id ||
+                      `${log.timestamp}-${log.action || log.eventType || index}`,
+                    eventType:
+                      log.eventType ||
+                      log.action ||
+                      'ADMIN_EVENT',
+                    email:
+                      log.email ||
+                      log.adminEmail,
+                  }))
+                );
+              }
 
               setCurrentUser(verifiedUser);
               setIsAuthenticated(true);
@@ -338,6 +371,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 error?.message ||
                   'Administrator authentication failed.'
               );
+
             } finally {
               setIsCheckingAuth(false);
             }
@@ -400,14 +434,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         window.clearTimeout(timeout);
       }
     };
-  }, []);
+  }, [onUpdateCategories]);
 
   // ============================================================
   // 2. RENDER GOOGLE SIGN-IN BUTTON
   // ============================================================
 
   useEffect(() => {
-    if (isAuthenticated || isCheckingAuth) {
+    if (
+      isAuthenticated ||
+      isCheckingAuth
+    ) {
       return;
     }
 
@@ -477,7 +514,23 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         'GET_ADMIN_LOGS'
       );
 
-      setAuditLogs(data.logs || []);
+      setAuditLogs(
+        (data.logs || []).map(
+          (log, index) => ({
+            ...log,
+            id:
+              log.id ||
+              `${log.timestamp}-${log.action || log.eventType || index}`,
+            eventType:
+              log.eventType ||
+              log.action ||
+              'ADMIN_EVENT',
+            email:
+              log.email ||
+              log.adminEmail,
+          })
+        )
+      );
 
     } catch (error: any) {
       console.error(
@@ -531,10 +584,8 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const handleSaveSettings = async () => {
     const updatedProduct: Product = {
       ...product,
-
       basePriceInr:
         Number(basePrice),
-
       gstRatePercent:
         Number(gstRate),
     };
@@ -545,18 +596,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
       payment: {
         ...settings.payment,
-
         upiId,
-
         beneficiaryName,
       },
 
       adsense: {
         ...settings.adsense,
-
         isEnabled:
           adsenseIsEnabled,
-
         publisherId:
           adsensePublisherId,
       },
@@ -730,11 +777,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             </div>
 
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-semibold">
+
               <Lock className="w-3.5 h-3.5" />
 
               <span>
                 Admin Portal Login
               </span>
+
             </div>
 
             <p className="text-xs text-stone-400 max-w-xs mx-auto">
@@ -746,6 +795,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           <div className="bg-stone-950 border border-stone-800 rounded-xl p-3.5 space-y-1.5 text-xs">
 
             <div className="flex items-center justify-between text-stone-400">
+
               <span>
                 Sole Authorized Account:
               </span>
@@ -753,6 +803,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               <span className="text-[10px] bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded font-mono">
                 Required
               </span>
+
             </div>
 
             <p className="text-white font-mono font-medium text-xs break-all">
@@ -781,6 +832,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </p>
 
               </div>
+
             </div>
           )}
 
@@ -803,16 +855,19 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onClick={onExitAdmin}
               className="text-xs text-stone-500 hover:text-stone-300 transition flex items-center justify-center gap-1.5 mx-auto"
             >
+
               <ArrowLeft className="w-3.5 h-3.5" />
 
               <span>
                 Return to Public Website
               </span>
+
             </button>
 
           </div>
 
         </div>
+
       </div>
     );
   }
@@ -876,11 +931,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               onClick={handleSaveSettings}
               className="bg-amber-500 hover:bg-amber-400 text-stone-950 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs cursor-pointer"
             >
+
               <Save className="w-3.5 h-3.5" />
 
               <span className="hidden sm:inline">
                 Save All Settings
               </span>
+
             </button>
 
             <button
@@ -888,11 +945,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               className="bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-white px-2.5 py-1.5 rounded-lg text-xs transition border border-stone-800 flex items-center gap-1.5 cursor-pointer"
               title="Sign out of Admin session"
             >
+
               <LogOut className="w-3.5 h-3.5 text-stone-400" />
 
               <span>
                 Logout
               </span>
+
             </button>
 
             <button
@@ -900,14 +959,17 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
               className="text-stone-400 hover:text-stone-200 text-xs transition flex items-center gap-1 pl-2 border-l border-stone-800"
               title="Return to public site"
             >
+
               <ArrowLeft className="w-3.5 h-3.5" />
 
               <span className="hidden sm:inline">
                 Public Site
               </span>
+
             </button>
 
           </div>
+
         </div>
 
         {/* TAB NAVIGATION */}
@@ -1001,6 +1063,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </button>
 
         </div>
+
       </header>
 
       {/* MAIN CONTENT */}
@@ -1019,9 +1082,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            PRICING
-        ====================================================== */}
+        {/* PRICING */}
 
         {activeTab === 'pricing' && (
           <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-6">
@@ -1122,11 +1183,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 onClick={handleSaveSettings}
                 className="bg-stone-900 hover:bg-stone-800 text-white font-semibold px-4 py-2 rounded-lg text-xs transition flex items-center gap-1.5 cursor-pointer"
               >
+
                 <Save className="w-3.5 h-3.5" />
 
                 <span>
                   Save Pricing Changes
                 </span>
+
               </button>
 
             </div>
@@ -1134,9 +1197,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            CATEGORIES
-        ====================================================== */}
+        {/* CATEGORIES */}
 
         {activeTab === 'categories' && (
           <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-4">
@@ -1148,6 +1209,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
             <div className="divide-y divide-stone-100 text-xs">
 
               {categories.map((c) => (
+
                 <div
                   key={c.id}
                   className="py-3 flex items-center justify-between"
@@ -1170,6 +1232,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   </span>
 
                 </div>
+
               ))}
 
             </div>
@@ -1177,9 +1240,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            ADSENSE
-        ====================================================== */}
+        {/* ADSENSE */}
 
         {activeTab === 'adsense' && (
           <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-4">
@@ -1240,9 +1301,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            OAUTH GUIDE
-        ====================================================== */}
+        {/* OAUTH GUIDE */}
 
         {activeTab === 'oauth-guide' && (
           <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-6">
@@ -1306,9 +1365,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                 </h3>
 
                 <div className="p-3 bg-stone-900 text-stone-200 font-mono text-[11px] rounded-lg select-all break-all">
-
                   {GOOGLE_CLIENT_ID}
-
                 </div>
 
                 <p className="text-[11px] text-stone-500 pt-1">
@@ -1330,9 +1387,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            FILE UPLOAD SECURITY
-        ====================================================== */}
+        {/* FILE UPLOAD SECURITY */}
 
         {activeTab === 'upload-security' && (
           <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-5">
@@ -1449,11 +1504,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                   >
 
                     <p className="font-bold">
-
                       {uploadTestResult.valid
                         ? '✓ Passed Binary Validation'
                         : '✕ Rejected by Security Filter'}
-
                     </p>
 
                     {uploadTestResult.valid ? (
@@ -1486,9 +1539,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
           </div>
         )}
 
-        {/* ======================================================
-            SECURITY AUDIT
-        ====================================================== */}
+        {/* SECURITY AUDIT */}
 
         {activeTab === 'security' && (
           <div className="space-y-4">
@@ -1566,10 +1617,13 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                 ) : (
 
-                  auditLogs.map((log) => (
+                  auditLogs.map((log, index) => (
 
                     <div
-                      key={log.id}
+                      key={
+                        log.id ||
+                        `${log.timestamp}-${index}`
+                      }
                       className="py-2.5 flex items-start justify-between gap-2"
                     >
 
@@ -1588,7 +1642,9 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
                                 : 'bg-stone-200 text-stone-800'
                             }`}
                           >
-                            {log.eventType}
+                            {log.eventType ||
+                              log.action ||
+                              'ADMIN_EVENT'}
                           </span>
 
                           <span className="text-stone-700 text-[11px] font-semibold">
@@ -1613,11 +1669,14 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
 
                         {new Date(
                           log.timestamp
-                        ).toLocaleTimeString([], {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                          second: '2-digit',
-                        })}
+                        ).toLocaleTimeString(
+                          [],
+                          {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          }
+                        )}
 
                       </span>
 
@@ -1635,6 +1694,7 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         )}
 
       </main>
+
     </div>
   );
 };
