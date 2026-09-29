@@ -3,17 +3,52 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
     <title>MyDigitAsset - Curated Daily Business News for India</title>
-    <meta name="description" content="Paid daily news subscription service for customers in India covering India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified international and domestic sources." />
-    <meta property="og:title" content="MyDigitAsset - Curated Daily Business News for India" />
-    <meta property="og:description" content="Paid daily news subscription service for customers in India covering India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified international and domestic sources." />
+
+    <meta
+      name="description"
+      content="Paid daily news subscription service for customers in India covering India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified international and domestic sources."
+    />
+
+    <meta
+      property="og:title"
+      content="MyDigitAsset - Curated Daily Business News for India"
+    />
+
+    <meta
+      property="og:description"
+      content="Paid daily news subscription service for customers in India covering India PE/VC, Startups, and Healthcare. Briefings are synchronized every morning from 6:00 AM to 7:00 AM from verified international and domestic sources."
+    />
+
     <meta property="og:type" content="website" />
+
     <meta name="twitter:card" content="summary_large_image" />
+
+    <!-- GitHub Pages SPA route recovery -->
+    <script>
+      (function () {
+        var redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+
+        if (redirect && redirect !== location.href) {
+          history.replaceState(null, null, redirect);
+        }
+      })();
+    </script>
   </head>
+
   <body>
     <div id="root"></div>
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-   <script type="module" src="./src/main.tsx"></script>
+
+    <script
+      src="https://accounts.google.com/gsi/client"
+      async
+      defer
+    ></script>
+
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
