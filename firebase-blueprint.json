@@ -1,0 +1,314 @@
+{
+  "entities": {
+    "Customer": {
+      "title": "Customer",
+      "description": "Customer account details, subscription status, and contact identifiers",
+      "type": "object",
+      "properties": {
+        "customerId": { "type": "string" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 255 },
+        "mobileCountryCode": { "type": "string", "maxLength": 10 },
+        "mobileNumber": { "type": "string", "maxLength": 20 },
+        "customerAuthToken": { "type": "string", "maxLength": 128 },
+        "telegramChatId": { "type": "string", "maxLength": 64 },
+        "telegramConnected": { "type": "boolean" },
+        "accountStatus": { "type": "string", "enum": ["active", "inactive", "suspended"] },
+        "trialStartDate": { "type": "string" },
+        "trialEndDate": { "type": "string" },
+        "trialStatus": { "type": "string", "enum": ["active", "expired", "converted"] },
+        "renewalRequested": { "type": "boolean" },
+        "renewalRequestedAt": { "type": "string" },
+        "renewalNotes": { "type": "string", "maxLength": 500 },
+        "selectedCategoryIds": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["customerId", "fullName", "email", "mobileCountryCode", "mobileNumber", "accountStatus", "createdAt", "updatedAt"]
+    },
+    "CustomerSession": {
+      "title": "CustomerSession",
+      "description": "Active session token for customer portal authentication",
+      "type": "object",
+      "properties": {
+        "sessionToken": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" },
+        "expiresAt": { "type": "string" }
+      },
+      "required": ["sessionToken", "customerId", "createdAt", "expiresAt"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Payment records, UTR submissions, and gateway references",
+      "type": "object",
+      "properties": {
+        "paymentId": { "type": "string", "maxLength": 64 },
+        "paymentOrderId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "paymentStatus": { "type": "string", "enum": ["pending", "successful", "failed", "cancelled", "refunded"] },
+        "paymentDate": { "type": "string" },
+        "gatewayReference": { "type": "string", "maxLength": 128 },
+        "providerOrderId": { "type": "string", "maxLength": 128 },
+        "providerPaymentId": { "type": "string", "maxLength": 128 },
+        "providerSignature": { "type": "string", "maxLength": 256 },
+        "provider": { "type": "string", "enum": ["razorpay", "manual_upi"] },
+        "purchasedCategoryIds": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["paymentId", "customerId", "amount", "currency", "paymentStatus", "paymentDate", "gatewayReference", "purchasedCategoryIds", "createdAt", "updatedAt"]
+    },
+    "PaymentOrder": {
+      "title": "PaymentOrder",
+      "description": "Internal payment orders created prior to checkout",
+      "type": "object",
+      "properties": {
+        "paymentOrderId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "categoryIds": { "type": "array" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string", "maxLength": 10 },
+        "provider": { "type": "string", "enum": ["razorpay"] },
+        "providerOrderId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["created", "checkout_started", "pending", "successful", "failed", "cancelled", "expired"] },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["paymentOrderId", "customerId", "categoryIds", "amount", "currency", "provider", "providerOrderId", "status", "createdAt", "updatedAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Customer digital asset subscriptions and calculated entitlement dates",
+      "type": "object",
+      "properties": {
+        "subscriptionId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "startDate": { "type": "string" },
+        "expiryDate": { "type": "string" },
+        "bufferStartDate": { "type": "string" },
+        "bufferEndDate": { "type": "string" },
+        "paidStartDate": { "type": "string" },
+        "paidEndDate": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "expired", "suspended", "pending"] },
+        "paymentId": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["subscriptionId", "customerId", "startDate", "expiryDate", "status", "paymentId", "createdAt", "updatedAt"]
+    },
+    "SubscriptionCategory": {
+      "title": "SubscriptionCategory",
+      "description": "Category entitlement link for an active subscription",
+      "type": "object",
+      "properties": {
+        "subscriptionId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "entitlementStatus": { "type": "string", "enum": ["active", "inactive", "transferred"] },
+        "assignedAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["subscriptionId", "customerId", "categoryId", "categoryName", "entitlementStatus", "assignedAt", "updatedAt"]
+    },
+    "CategoryTransferAudit": {
+      "title": "CategoryTransferAudit",
+      "description": "Audit record of category changes performed by admin",
+      "type": "object",
+      "properties": {
+        "transferId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "subscriptionId": { "type": "string", "maxLength": 64 },
+        "oldCategoryId": { "type": "string", "maxLength": 64 },
+        "oldCategoryName": { "type": "string", "maxLength": 100 },
+        "newCategoryId": { "type": "string", "maxLength": 64 },
+        "newCategoryName": { "type": "string", "maxLength": 100 },
+        "adminEmail": { "type": "string", "maxLength": 255 },
+        "timestamp": { "type": "string" },
+        "reason": { "type": "string", "maxLength": 500 },
+        "result": { "type": "string", "enum": ["SUCCESS", "REJECTED"] },
+        "rejectionReason": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["transferId", "customerId", "subscriptionId", "oldCategoryId", "oldCategoryName", "newCategoryId", "newCategoryName", "adminEmail", "timestamp", "reason", "result"]
+    },
+    "TelegramDeliveryLog": {
+      "title": "TelegramDeliveryLog",
+      "description": "Log of Telegram news delivery attempts and status",
+      "type": "object",
+      "properties": {
+        "deliveryId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "newsDate": { "type": "string", "maxLength": 20 },
+        "telegramChatId": { "type": "string", "maxLength": 64 },
+        "attemptedAt": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "sent", "failed", "skipped", "expired", "not_entitled", "telegram_not_connected"] },
+        "telegramMessageId": { "type": "string", "maxLength": 64 },
+        "error": { "type": "string", "maxLength": 1000 },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["deliveryId", "customerId", "categoryId", "newsDate", "telegramChatId", "attemptedAt", "status", "timestamp"]
+    },
+    "DailyNewsPackage": {
+      "title": "DailyNewsPackage",
+      "description": "Metadata for daily generated news briefing per category",
+      "type": "object",
+      "properties": {
+        "packageId": { "type": "string", "maxLength": 64 },
+        "newsDate": { "type": "string", "maxLength": 20 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "categoryName": { "type": "string", "maxLength": 100 },
+        "generationStatus": { "type": "string", "enum": ["pending", "success", "failed", "partial"] },
+        "storyCount": { "type": "number" },
+        "errorMessage": { "type": "string", "maxLength": 1000 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["packageId", "newsDate", "categoryId", "categoryName", "generationStatus", "storyCount", "createdAt", "updatedAt"]
+    },
+    "NewsStory": {
+      "title": "NewsStory",
+      "description": "Individual news story inside a daily news package",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string", "maxLength": 64 },
+        "packageId": { "type": "string", "maxLength": 64 },
+        "newsDate": { "type": "string", "maxLength": 20 },
+        "categoryId": { "type": "string", "maxLength": 64 },
+        "position": { "type": "number" },
+        "headline": { "type": "string", "maxLength": 500 },
+        "summary": { "type": "string", "maxLength": 2000 },
+        "sourceName": { "type": "string", "maxLength": 200 },
+        "sourceUrl": { "type": "string", "maxLength": 1000 },
+        "sentimentType": { "type": "string", "enum": ["constructive", "negative", "neutral"] },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["storyId", "packageId", "newsDate", "categoryId", "position", "headline", "summary", "sourceName", "sourceUrl", "sentimentType", "createdAt"]
+    },
+    "TelegramConnectionToken": {
+      "title": "TelegramConnectionToken",
+      "description": "One-time cryptographically secure deep-link tokens for Telegram binding",
+      "type": "object",
+      "properties": {
+        "tokenId": { "type": "string", "maxLength": 64 },
+        "token": { "type": "string", "maxLength": 128 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "expiresAt": { "type": "string" },
+        "used": { "type": "boolean" },
+        "usedAt": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["tokenId", "token", "customerId", "expiresAt", "used", "createdAt"]
+    },
+    "TelegramConnectionAuditEvent": {
+      "title": "TelegramConnectionAuditEvent",
+      "description": "Audit event log for all Telegram account binding and reminder operations",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 64 },
+        "customerId": { "type": "string", "maxLength": 64 },
+        "eventType": { "type": "string", "enum": ["TOKEN_GENERATED", "CONNECTED", "REJECTED", "EXPIRED", "DISCONNECTED", "DAY3_REMINDER_SENT", "DAY3_REMINDER_SKIPPED", "DAY3_REMINDER_FAILED"] },
+        "telegramChatId": { "type": "string", "maxLength": 64 },
+        "telegramUsername": { "type": "string", "maxLength": 100 },
+        "timestamp": { "type": "string" },
+        "metadata": { "type": "string", "maxLength": 1000 }
+      },
+      "required": ["eventId", "customerId", "eventType", "timestamp"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Digital asset category definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64 },
+        "productId": { "type": "string", "maxLength": 64 },
+        "name": { "type": "string", "maxLength": 100 },
+        "slug": { "type": "string", "maxLength": 100 },
+        "description": { "type": "string", "maxLength": 500 },
+        "isActive": { "type": "boolean" },
+        "displayOrder": { "type": "number" }
+      },
+      "required": ["id", "productId", "name", "slug", "isActive", "displayOrder"]
+    },
+    "SchedulerState": {
+      "title": "SchedulerState",
+      "description": "Distributed scheduler run records and execution locks across Cloud Run instances",
+      "type": "object",
+      "properties": {
+        "stateId": { "type": "string", "maxLength": 64 },
+        "lastGenerationDate": { "type": "string", "maxLength": 20 },
+        "lastDeliveryDate": { "type": "string", "maxLength": 20 },
+        "lastDay3EvaluationDate": { "type": "string", "maxLength": 20 },
+        "activeLockInstanceId": { "type": "string", "maxLength": 128 },
+        "lockedUntil": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["stateId", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/customers/{customerId}": {
+      "schema": "Customer",
+      "description": "Customer profiles and account information"
+    },
+    "/customerSessions/{sessionToken}": {
+      "schema": "CustomerSession",
+      "description": "Customer authentication sessions"
+    },
+    "/payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Payment records and UTR proof submissions"
+    },
+    "/paymentOrders/{paymentOrderId}": {
+      "schema": "PaymentOrder",
+      "description": "Payment order records"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "Subscriptions and calculated entitlement dates"
+    },
+    "/subscriptionCategories/{id}": {
+      "schema": "SubscriptionCategory",
+      "description": "Subscription category links"
+    },
+    "/categoryTransferAudits/{transferId}": {
+      "schema": "CategoryTransferAudit",
+      "description": "Category transfer audit logs"
+    },
+    "/telegramDeliveryLogs/{deliveryId}": {
+      "schema": "TelegramDeliveryLog",
+      "description": "Telegram news delivery logs"
+    },
+    "/dailyNewsPackages/{packageId}": {
+      "schema": "DailyNewsPackage",
+      "description": "Daily news packages per category"
+    },
+    "/newsStories/{storyId}": {
+      "schema": "NewsStory",
+      "description": "Individual news stories"
+    },
+    "/telegramConnectionTokens/{token}": {
+      "schema": "TelegramConnectionToken",
+      "description": "Deep-link tokens for Telegram binding"
+    },
+    "/telegramConnectionAudits/{eventId}": {
+      "schema": "TelegramConnectionAuditEvent",
+      "description": "Telegram audit logs"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Product categories"
+    },
+    "/schedulerState/{stateId}": {
+      "schema": "SchedulerState",
+      "description": "Distributed scheduler run records and execution locks"
+    },
+    "/test/{docId}": {
+      "schema": "Customer",
+      "description": "System connectivity verification test document"
+    }
+  }
+}

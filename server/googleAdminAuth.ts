@@ -172,7 +172,7 @@ export async function exchangeCodeAndVerifyToken(
       return { valid: false, error: 'No ID token returned by Google.' };
     }
 
-    // 2. Cryptographic signature and claim verification
+    // 2. Cryptographic signature and claim verification (Google public keys + audience)
     const ticket = await client.verifyIdToken({
       idToken: tokens.id_token,
       audience: clientId,
@@ -183,17 +183,39 @@ export async function exchangeCodeAndVerifyToken(
       return { valid: false, error: 'Empty token payload received from Google.' };
     }
 
+    // Step A: Explicit audience verification
+    if (payload.aud !== clientId) {
+      return { valid: false, error: 'Google ID token audience mismatch.' };
+    }
+
+    // Step B: Explicit expiration check
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp < nowSec) {
+      return { valid: false, error: 'Google ID token has expired.' };
+    }
+
+    // Step C: Explicit email verification
     if (!payload.email) {
       return { valid: false, error: 'Google account has no associated email address.' };
     }
 
-    if (!payload.email_verified) {
+    if (payload.email_verified !== true) {
       return { valid: false, error: 'Google email address is not verified by Google.' };
+    }
+
+    const authorizedEmail = getAuthorizedAdminEmail();
+    const candidateEmail = payload.email.trim().toLowerCase();
+    if (candidateEmail !== authorizedEmail) {
+      return {
+        valid: false,
+        email: candidateEmail,
+        error: `Unauthorized Google account: ${candidateEmail}. Only ${authorizedEmail} is permitted.`,
+      };
     }
 
     return {
       valid: true,
-      email: payload.email.trim().toLowerCase(),
+      email: candidateEmail,
       name: payload.name || 'Administrator',
       picture: payload.picture,
     };
@@ -316,4 +338,74 @@ export function requireAdminAuth(req: Request, res: Response, next: NextFunction
 
   (req as any).adminSession = session;
   next();
+}
+
+/**
+ * Directly verifies a Google ID token passed by a client,
+ * explicitly checking signature, audience, expiry, email_verified, and email match.
+ */
+export async function verifyGoogleIdTokenDirect(idToken: string): Promise<{
+  valid: boolean;
+  email?: string;
+  name?: string;
+  picture?: string;
+  error?: string;
+}> {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  if (!clientId) {
+    return { valid: false, error: 'GOOGLE_CLIENT_ID is not configured on the server.' };
+  }
+
+  try {
+    const client = new OAuth2Client({ clientId });
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: clientId,
+    });
+    const payload = ticket.getPayload();
+    if (!payload) {
+      return { valid: false, error: 'Empty payload returned from Google ID token.' };
+    }
+
+    // 1. Audience verification
+    if (payload.aud !== clientId) {
+      return { valid: false, error: 'Google ID token audience does not match configured Google Client ID.' };
+    }
+
+    // 2. Expiration verification
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!payload.exp || payload.exp < nowSec) {
+      return { valid: false, error: 'Google ID token has expired.' };
+    }
+
+    // 3. Email presence
+    if (!payload.email) {
+      return { valid: false, error: 'Google token does not contain an email address.' };
+    }
+
+    // 4. email_verified verification
+    if (payload.email_verified !== true) {
+      return { valid: false, error: 'Google email address is not verified by Google.' };
+    }
+
+    // 5. Authorized email verification
+    const authorizedEmail = getAuthorizedAdminEmail();
+    const candidateEmail = payload.email.trim().toLowerCase();
+    if (candidateEmail !== authorizedEmail) {
+      return {
+        valid: false,
+        email: candidateEmail,
+        error: `Unauthorized Google account: ${candidateEmail}. Only ${authorizedEmail} is permitted.`,
+      };
+    }
+
+    return {
+      valid: true,
+      email: candidateEmail,
+      name: payload.name || 'Administrator',
+      picture: payload.picture,
+    };
+  } catch (err: any) {
+    return { valid: false, error: err.message || 'Google token validation failed.' };
+  }
 }

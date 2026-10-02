@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Customers collection
+    match /customers/{customerId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 2. Customer Sessions
+    match /customerSessions/{sessionId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 3. Payments
+    match /payments/{paymentId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 4. Payment Orders
+    match /paymentOrders/{orderId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 5. Subscriptions
+    match /subscriptions/{subscriptionId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 6. Subscription Categories
+    match /subscriptionCategories/{id} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 7. Category Transfer Audits
+    match /categoryTransferAudits/{auditId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 8. Telegram Delivery Logs
+    match /telegramDeliveryLogs/{logId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 9. Daily News Packages
+    match /dailyNewsPackages/{packageId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 10. News Stories
+    match /newsStories/{storyId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 11. Telegram Connection Tokens
+    match /telegramConnectionTokens/{token} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 12. Telegram Connection Audits
+    match /telegramConnectionAudits/{auditId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 13. Categories
+    match /categories/{categoryId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 14. Scheduler State & Distributed Locks
+    match /schedulerState/{stateId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 15. Connectivity test document
+    match /test/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // Default-deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

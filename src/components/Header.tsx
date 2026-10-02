@@ -1,6 +1,6 @@
 import React from 'react';
 import { ShieldCheck, Sparkles, User, Globe } from 'lucide-react';
-import { GlobalSiteSettings, Product } from '../types';
+import { GlobalSiteSettings, Product, Customer } from '../types';
 import { Logo } from './Logo';
 
 interface HeaderProps {
@@ -9,6 +9,8 @@ interface HeaderProps {
   userState: 'trial' | 'expired' | 'subscribed';
   setUserState: (state: 'trial' | 'expired' | 'subscribed') => void;
   onOpenPaywall: () => void;
+  customer?: Customer | null;
+  onOpenCustomerModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,6 +19,8 @@ export const Header: React.FC<HeaderProps> = ({
   userState,
   setUserState,
   onOpenPaywall,
+  customer,
+  onOpenCustomerModal,
 }) => {
   const gstAmount = Number(((product.basePriceInr * product.gstRatePercent) / 100).toFixed(2));
   const totalAmount = (product.basePriceInr + gstAmount).toFixed(2);
@@ -54,6 +58,26 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         <div className="flex items-center gap-2 sm:gap-3">
+          {/* Customer Account Pill / Button (Section 2, 3) */}
+          {customer ? (
+            <button
+              onClick={onOpenCustomerModal}
+              className="inline-flex items-center gap-1.5 bg-stone-100 hover:bg-stone-200 text-stone-800 text-xs font-semibold px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg border border-stone-300 transition"
+              title="View private subscriber account"
+            >
+              <User className="w-3.5 h-3.5 text-stone-700" />
+              <span className="max-w-[120px] truncate">{customer.fullName}</span>
+            </button>
+          ) : (
+            <button
+              onClick={onOpenCustomerModal}
+              className="inline-flex items-center gap-1.5 bg-stone-50 hover:bg-stone-100 text-stone-700 text-xs font-medium px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg border border-stone-200 transition"
+            >
+              <User className="w-3.5 h-3.5 text-stone-500" />
+              <span>Subscriber Register</span>
+            </button>
+          )}
+
           {userState === 'trial' && (
             <div className="hidden sm:flex flex-col items-end">
               <span className="text-xs font-semibold text-amber-700 flex items-center gap-1">

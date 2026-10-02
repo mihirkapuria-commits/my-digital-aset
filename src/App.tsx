@@ -5,13 +5,14 @@ import {
   initialNewsArticles, 
   initialSiteSettings 
 } from './data/initialData';
-import { Product, Category, NewsArticle, GlobalSiteSettings } from './types';
+import { Product, Category, NewsArticle, GlobalSiteSettings, Customer } from './types';
 import { Header } from './components/Header';
 import { CategoryFilter } from './components/CategoryFilter';
 import { FreeTrialBanner } from './components/FreeTrialBanner';
 import { NewsCard } from './components/NewsCard';
 import { AdSenseSlot } from './components/AdSenseSlot';
 import { PaywallModal } from './components/PaywallModal';
+import { CustomerModal } from './components/CustomerModal';
 import { AdminPortal } from './components/AdminPortal';
 import { Footer } from './components/Footer';
 import { Newspaper, Sparkles, Filter } from 'lucide-react';
@@ -25,6 +26,8 @@ export default function App() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null);
   const [userState, setUserState] = useState<'trial' | 'expired' | 'subscribed'>('trial');
   const [isPaywallOpen, setIsPaywallOpen] = useState(false);
+  const [isCustomerModalOpen, setIsCustomerModalOpen] = useState(false);
+  const [customer, setCustomer] = useState<Customer | null>(null);
 
   // Check whether current URL is private Admin path (/admin)
   const [isAdminPath, setIsAdminPath] = useState<boolean>(() => {
@@ -41,13 +44,41 @@ export default function App() {
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
 
-  // Fetch persisted settings from server
+  // Fetch persisted settings and active categories from server
   useEffect(() => {
     fetch('/api/site-settings')
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (data && data.settings) {
           setSettings((prev) => ({ ...prev, ...data.settings }));
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/categories')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+        }
+      })
+      .catch(() => {});
+
+    // Restore private customer session and check active subscription entitlements
+    fetch('/api/customer/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.ok && data.customer) {
+          setCustomer(data.customer);
+          // Check authoritative paid entitlement (Section 1)
+          fetch('/api/customer/entitlements')
+            .then((r) => (r.ok ? r.json() : null))
+            .then((entData) => {
+              if (entData && entData.hasActiveSubscription) {
+                setUserState('subscribed');
+              }
+            })
+            .catch(() => {});
         }
       })
       .catch(() => {});
@@ -73,8 +104,16 @@ export default function App() {
     return categories.find((c) => c.id === selectedCategoryId);
   }, [categories, selectedCategoryId]);
 
-  const handlePaymentSubmitted = (txnRef: string) => {
+  const handlePaymentActivated = () => {
     setUserState('subscribed');
+    fetch('/api/customer/me')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.ok && data.customer) {
+          setCustomer(data.customer);
+        }
+      })
+      .catch(() => {});
   };
 
   // If navigating directly to private Admin URL
@@ -107,6 +146,8 @@ export default function App() {
         userState={userState}
         setUserState={setUserState}
         onOpenPaywall={() => setIsPaywallOpen(true)}
+        customer={customer}
+        onOpenCustomerModal={() => setIsCustomerModalOpen(true)}
       />
 
       {/* 2. Category Tab Navigation */}
@@ -211,13 +252,27 @@ export default function App() {
         onOpenPaywall={() => setIsPaywallOpen(true)}
       />
 
-      {/* 5. Paywall / Checkout Modal */}
+      {/* 5. Customer Profile / Registration Modal */}
+      <CustomerModal
+        isOpen={isCustomerModalOpen}
+        onClose={() => setIsCustomerModalOpen(false)}
+        customer={customer}
+        categories={categories}
+        onCustomerUpdated={setCustomer}
+        onProceedToPayment={() => setIsPaywallOpen(true)}
+        product={product}
+        settings={settings}
+      />
+
+      {/* 6. Paywall / Checkout Modal */}
       <PaywallModal
         isOpen={isPaywallOpen}
         onClose={() => setIsPaywallOpen(false)}
         product={product}
         paymentConfig={settings.payment}
-        onPaymentSubmitted={handlePaymentSubmitted}
+        customer={customer}
+        onOpenCustomerRegister={() => setIsCustomerModalOpen(true)}
+        onPaymentActivated={handlePaymentActivated}
       />
     </div>
   );
