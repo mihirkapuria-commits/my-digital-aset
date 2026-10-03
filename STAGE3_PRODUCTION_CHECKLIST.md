@@ -21,12 +21,16 @@ This document provides the authoritative, evidence-based production readiness ev
 
 ---
 
-## 3. Scheduler: WARNING
-* **Status:** WARNING
+## 3. Scheduler: PASS
+* **Status:** PASS
 * **Evidence & Analysis:**
-  * The Node.js scheduler (`server/schedulerService.ts`) runs an in-process 60-second `setInterval` loop to trigger daily generation (06:00 AM IST), private Telegram delivery (06:15 AM IST), and Day-3 trial reminders.
-  * **Cloud Run Scale-to-Zero Risk:** If the Cloud Run service scales down to 0 instances overnight due to absence of HTTP traffic, in-process timers are frozen/terminated. The 06:00 AM IST generation and delivery will not trigger unless the service is configured with `min-instances: 1` with `--no-cpu-throttling` OR an external **Google Cloud Scheduler** cron job invokes an authenticated webhook/trigger endpoint (`POST /api/admin/scheduler/trigger`) at 06:00 AM and 06:15 AM IST.
-  * **Uniqueness:** Apps Script has no active cron triggers; Node.js is the sole authoritative scheduler.
+  * **Stage 3A Option 2 (Google Apps Script Time-Driven Triggers):** Eliminates Cloud Run scale-to-zero timer freeze without external Cloud Scheduler costs or API blockers.
+  * Google Apps Script runs two installable time-driven triggers:
+    1. `scheduledMorningNewsCycle` (~06:00 AM Asia/Kolkata): Calls `POST /api/admin/scheduler/trigger` with `{"action":"generate"}` and upon verified success sequentially calls `{"action":"deliver"}`.
+    2. `scheduledNoonRemindersCycle` (~12:00 PM Asia/Kolkata): Calls `POST /api/admin/scheduler/trigger` with `{"action":"reminders"}`.
+  * **Machine-to-Machine Security:** Authenticated via header `X-Scheduler-Token` matched in constant time (`crypto.timingSafeEqual`) against `APPS_SCRIPT_SCHEDULER_SECRET` (>= 256 bits entropy).
+  * **Idempotency Guarantee:** Cloud Run's deterministic Firestore keys (`del_<newsDate>_<customerId>_<categoryId>`, `tga_day3_<customerId>`, `pkg_<newsDate>_<categoryId>`) protect against duplicate executions.
+  * **In-Process Fallback:** Node.js scheduler (`server/schedulerService.ts`) remains active in-process whenever instances are warm.
 
 ---
 
@@ -143,11 +147,13 @@ This document provides the authoritative, evidence-based production readiness ev
   * **Phase 4 Tests:** 8/8 passed (Telegram deep-link linking & security).
   * **Phase 5 Tests:** 25/25 passed (News generation, grounded sources & delivery).
   * **Phase 6 Tests:** 34/34 passed (Payment security, regression & isolation).
-  * **Stage 2 Tests:** 17/17 passed (Customer UX, tenant isolation & buffer math).
+  * **Stage 2 Tests:** 23/23 passed (Customer UX, tenant isolation, duplicate email/phone security & buffer math).
   * **Stage 3 Tests:** 21/21 passed (Automatic Day-3 trial reminders & retry resilience).
+  * **Stage 3A Tests:** 17/17 passed (Atomic check-and-reserve concurrency race protection, Cloud Scheduler OIDC verification, measurable source provenance, failure retry resilience).
   * **Stage 3 Final Audit Tests:** 27/27 passed (Cloud Run audit, CSRF, idempotency & secrets).
   * **Stage 3B Firestore Native Tests:** 25/25 passed (Direct roundtrip, atomic transactions, rehydration, multi-instance lock).
-  * **Total Automated Tests:** 173 of 173 passed with zero failures.
+  * **Stage 3C Google Sheet Sync Tests:** 28/28 passed (HMAC-SHA256 request signing, canonical message hashing, replay protection, durable checkpoint fallback, lease lock, overlap window, deterministic upsert, zero duplicates, decoupling).
+  * **Total Automated Tests:** 224 of 224 passed with zero failures.
 
 ---
 

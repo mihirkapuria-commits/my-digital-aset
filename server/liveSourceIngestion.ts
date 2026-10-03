@@ -14,7 +14,7 @@ import { CONFIGURED_SOURCE_DOMAINS, RawCollectedArticle, validateStorySource } f
  * - Single source failure isolation
  * - Strict freshness window filtering (48 hours)
  * - URL & title canonical deduplication
- * - Strict candidate-pool URL provenance check (zero LLM hallucination)
+ * - Strict candidate-pool URL provenance check (measurable source grounding constraint)
  * - Clean separation between Live and Mock/Fixture modes
  */
 
@@ -123,7 +123,7 @@ export const OFFICIAL_LIVE_FEEDS: LiveSourceFeedConfig[] = [
     name: 'Mint',
     feedUrl: 'https://www.livemint.com/rss/industry',
     domain: 'livemint.com',
-    categoryIds: ['cat_india_re_infra', 'cat_india_mfg_auto'],
+    categoryIds: ['cat_india_re_infra', 'cat_india_mfg_auto', 'cat_india_energy_renewables'],
     isActive: true,
   },
   {
@@ -131,7 +131,7 @@ export const OFFICIAL_LIVE_FEEDS: LiveSourceFeedConfig[] = [
     name: 'Business Standard',
     feedUrl: 'https://www.business-standard.com/rss/companies-101.rss',
     domain: 'business-standard.com',
-    categoryIds: ['cat_india_re_infra', 'cat_india_consumer_fmcg', 'cat_india_mfg_auto'],
+    categoryIds: ['cat_india_re_infra', 'cat_india_consumer_fmcg', 'cat_india_mfg_auto', 'cat_india_energy_renewables', 'cat_india_hr_employment', 'cat_india_marketing_ads'],
     isActive: true,
   },
 
@@ -167,7 +167,7 @@ export const OFFICIAL_LIVE_FEEDS: LiveSourceFeedConfig[] = [
     name: 'Mint',
     feedUrl: 'https://www.livemint.com/rss/companies',
     domain: 'livemint.com',
-    categoryIds: ['cat_india_consumer_fmcg', 'cat_india_marketing_ads'],
+    categoryIds: ['cat_india_consumer_fmcg', 'cat_india_marketing_ads', 'cat_india_hr_employment'],
     isActive: true,
   },
 
@@ -197,7 +197,7 @@ export const OFFICIAL_LIVE_FEEDS: LiveSourceFeedConfig[] = [
     name: 'The Economic Times',
     feedUrl: 'https://economictimes.indiatimes.com/news/economy/rssfeeds/13762478.cms',
     domain: 'economictimes.indiatimes.com',
-    categoryIds: ['cat_india_economy_business'],
+    categoryIds: ['cat_india_economy_business', 'cat_india_energy_renewables', 'cat_india_hr_employment'],
     isActive: true,
   },
   {

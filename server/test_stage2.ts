@@ -4,6 +4,8 @@ import {
   registerOrLoginCustomer,
   getCustomerById,
   getCustomerBySessionToken,
+  updateCustomerMobile,
+  toCustomerProfileDTO,
 } from './db.js';
 import {
   calculateSubscriptionDates,
@@ -97,9 +99,9 @@ async function runStage2Suite() {
   // -------------------------------------------------------------
   console.log('\n--- SUITE 2: Telegram Deep Link Connection Flow ---');
   const tgResult = generateTelegramConnectionToken(alice.customerId);
-  assertTest(3, 'One-time token format follows 256-bit high-entropy random hex with zero PII',
-    Boolean(tgResult.token && /^(tgtok_|mda_)[a-f0-9]{64}$/.test(tgResult.token)),
-    `Generated: ${tgResult.token.substring(0, 16)}... (Length: ${tgResult.token.length})`
+  assertTest(3, 'One-time token format follows high-entropy random hex strictly <= 64 chars for Telegram API',
+    Boolean(tgResult.token && tgResult.token.length <= 64 && /^(tgtok_|mda_)[a-f0-9]{48,64}$/.test(tgResult.token)),
+    `Generated: ${tgResult.token.substring(0, 16)}... (Length: ${tgResult.token.length} chars <= 64 limit)`
   );
 
   assertTest(4, 'Deep link constructed with bot username and token parameter',
@@ -232,6 +234,93 @@ async function runStage2Suite() {
   assertTest(17, 'Direct Google token verification rejects malformed / unsigned tokens',
     !invalidResult.valid,
     `Error returned: ${invalidResult.error}`
+  );
+
+  // -------------------------------------------------------------
+  // TEST 6: Duplicate Email & Phone Security Rules (Stage 2 Hardening)
+  // -------------------------------------------------------------
+  console.log('\n--- SUITE 6: Duplicate Email & Phone Security Rules ---');
+
+  // Test 18: Existing email + another customer's phone -> REJECT
+  let test18Caught = false;
+  let test18Error = '';
+  try {
+    registerOrLoginCustomer({
+      fullName: 'Alice Phone Hijack Attempt',
+      email: 'alice.stage2@example.com', // Alice's email
+      mobileCountryCode: '+91',
+      mobileNumber: '9844455566', // Bob's phone number!
+      selectedCategoryIds: ['cat_india_pe_vc'],
+    });
+  } catch (err: any) {
+    test18Caught = true;
+    test18Error = err.message;
+  }
+  assertTest(18, 'Existing email + another customer\'s phone is strictly rejected',
+    test18Caught && test18Error.includes('associated with an existing account'),
+    `Rejected with safe error: ${test18Error}`
+  );
+
+  // Test 19: Existing phone + another customer's email -> REJECT
+  let test19Caught = false;
+  let test19Error = '';
+  try {
+    registerOrLoginCustomer({
+      fullName: 'Charlie Impersonation Attempt',
+      email: 'charlie.new@example.com', // New email
+      mobileCountryCode: '+91',
+      mobileNumber: '9811122233', // Alice's phone number!
+      selectedCategoryIds: ['cat_india_pe_vc'],
+    });
+  } catch (err: any) {
+    test19Caught = true;
+    test19Error = err.message;
+  }
+  assertTest(19, 'Existing phone + new email is strictly rejected (no phone stealing)',
+    test19Caught && test19Error.includes('associated with an existing account'),
+    `Rejected with safe error: ${test19Error}`
+  );
+
+  // Test 20: Authenticated customer changing their own phone -> SUCCEED
+  const changeRes = updateCustomerMobile(alice.customerId, '+91', '9811199999');
+  const aliceAfterChange = getCustomerById(alice.customerId);
+  assertTest(20, 'Authenticated customer can update their own phone number',
+    changeRes.success && aliceAfterChange?.mobileNumber === '9811199999',
+    `Updated Alice phone to: ${aliceAfterChange?.mobileCountryCode} ${aliceAfterChange?.mobileNumber}`
+  );
+
+  // Test 21: Unauthenticated attempt to change or collide phone -> BLOCKED
+  // Authenticated Bob trying to change to Alice's new phone -> REJECT
+  const bobCollideRes = updateCustomerMobile(bob.customerId, '+91', '9811199999');
+  assertTest(21, 'Changing mobile to a number owned by another customer is rejected',
+    !bobCollideRes.success && Boolean(bobCollideRes.error?.includes('already linked')),
+    `Rejected with: ${bobCollideRes.error}`
+  );
+
+  // Unauthenticated registration re-login for Alice cannot change phone number
+  const aliceRelogin = registerOrLoginCustomer({
+    fullName: 'Alice Verma Logged In',
+    email: 'alice.stage2@example.com',
+    mobileCountryCode: '+91',
+    mobileNumber: '9877777777', // New number attempted in unauthenticated registration
+    selectedCategoryIds: ['cat_india_pe_vc'],
+  });
+  const alicePostRelogin = getCustomerById(alice.customerId);
+  assertTest(22, 'Unauthenticated registration/login preserves phone and customerId without mutation',
+    aliceRelogin.customer.customerId === alice.customerId && alicePostRelogin?.mobileNumber === '9811199999',
+    `Preserved customerId: ${aliceRelogin.customer.customerId}, Preserved phone: ${alicePostRelogin?.mobileNumber}`
+  );
+
+  // Test 23: Customer Profile DTO Data Minimization (No telegramChatId or secret token)
+  const profileDTO = toCustomerProfileDTO(alicePostRelogin!);
+  assertTest(23, 'CustomerProfileDTO strips telegramChatId and secret tokens',
+    Boolean(
+      (profileDTO as any).telegramChatId === undefined &&
+      (profileDTO as any).customerAuthToken === undefined &&
+      typeof profileDTO.telegramConnected === 'boolean' &&
+      profileDTO.email === 'alice.stage2@example.com'
+    ),
+    `DTO contains safe fields only. telegramConnected: ${profileDTO.telegramConnected}, telegramChatId: ${(profileDTO as any).telegramChatId}`
   );
 
   // Summary

@@ -108,6 +108,12 @@ function doPost(e) {
       return jsonResponse(handleAdminUpdatePaymentConfig(payload));
     }
 
+    // 4. Authorized Machine-to-Machine Sync Endpoint (Stage 3C)
+    if (action === 'SYNC_FIRESTORE_BATCH') {
+      assertHmacAuth(payload);
+      return jsonResponse(handleSyncFirestoreBatch(payload));
+    }
+
     return jsonResponse({ ok: false, error: 'Unknown action: ' + action });
   } catch (err) {
     return jsonResponse({ ok: false, error: err.toString() });
@@ -192,6 +198,23 @@ function initAllSheets(ss) {
 
   ensureSheet(ss, 'DeliveryLogs', [
     'logId', 'timestamp', 'customerId', 'telegramChatId', 'categoryId', 'deliveryType', 'status', 'error'
+  ]);
+
+  // Stage 3C New Tabs (Preserving all existing tabs & historical data)
+  ensureSheet(ss, 'PaymentOrders', [
+    'orderId', 'customerId', 'amount', 'currency', 'status', 'utrReference', 'createdAt', 'updatedAt'
+  ]);
+
+  ensureSheet(ss, 'DailyNewsPackages', [
+    'packageId', 'newsDate', 'generatedAt', 'totalStories', 'categoryIds', 'status'
+  ]);
+
+  ensureSheet(ss, 'SystemScheduler', [
+    'stateId', 'lastGenerationDate', 'lastDeliveryDate', 'lastDay3EvaluationDate', 'lastSyncDate', 'updatedAt'
+  ]);
+
+  ensureSheet(ss, 'CategoryTransferAudits', [
+    'auditId', 'customerId', 'previousCategoryId', 'newCategoryId', 'transferredBy', 'reason', 'timestamp'
   ]);
 
   // Seed default payment config if not present
@@ -432,14 +455,58 @@ function handleRegisterTrial(payload) {
   var subsSheet = ss.getSheetByName('Subscriptions');
   var subCatsSheet = ss.getSheetByName('SubscriptionCategories');
 
-  var customerId = 'cust_' + Utilities.getUuid().substring(0, 12);
-  var customerSecretToken = 'csec_' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
-  var subscriptionId = 'sub_' + Utilities.getUuid().substring(0, 12);
-  var entitlementId = 'ent_' + Utilities.getUuid().substring(0, 12);
+  var normalizedEmail = (payload.email || '').trim().toLowerCase();
+  var normalizedPhone = (mobileCountryCode + mobileNumber).replace(/[^0-9]/g, '');
+  var customersData = customersSheet.getDataRange().getValues();
+  var existingEmailCust = null;
+  var existingPhoneCust = null;
+
+  for (var i = 1; i < customersData.length; i++) {
+    var rowEmail = (customersData[i][3] || '').toString().trim().toLowerCase();
+    var rowPhone = ((customersData[i][4] || '') + '' + (customersData[i][5] || '')).replace(/[^0-9]/g, '');
+    var rowCustId = customersData[i][0];
+    if (normalizedEmail && rowEmail === normalizedEmail) {
+      existingEmailCust = { rowIndex: i + 1, customerId: rowCustId, token: customersData[i][1], phone: rowPhone };
+    }
+    if (normalizedPhone && rowPhone === normalizedPhone) {
+      existingPhoneCust = { rowIndex: i + 1, customerId: rowCustId, token: customersData[i][1], email: rowEmail };
+    }
+  }
+
+  // Security Rule 1: Email A belongs to Customer A, but submitted phone belongs to Customer B
+  if (existingEmailCust && existingPhoneCust && existingEmailCust.customerId !== existingPhoneCust.customerId) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
+
+  // Security Rule 2: Email is new, but submitted phone belongs to Customer B
+  if (!existingEmailCust && existingPhoneCust) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
 
   var now = new Date();
   var trialStartStr = formatDate(now);
   var trialEndStr = formatDate(addDays(now, 2)); // Day 1 = today, Day 2 = +1, Day 3 = +2
+
+  if (existingEmailCust) {
+    // Existing customer: preserve customerId, phone, and historical subscriptions; return fresh session
+    var existingTokenData = generateTelegramTokenForCustomer(existingEmailCust.customerId);
+    return {
+      ok: true,
+      customerId: existingEmailCust.customerId,
+      customerSecretToken: existingEmailCust.token,
+      subscriptionId: '',
+      state: 'TRIAL_ACTIVE',
+      trialStartDate: trialStartStr,
+      trialEndDate: trialEndStr,
+      telegramDeepLink: existingTokenData.deepLink,
+      telegramToken: existingTokenData.token
+    };
+  }
+
+  var customerId = 'cust_' + Utilities.getUuid().substring(0, 12);
+  var customerSecretToken = 'csec_' + Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '');
+  var subscriptionId = 'sub_' + Utilities.getUuid().substring(0, 12);
+  var entitlementId = 'ent_' + Utilities.getUuid().substring(0, 12);
 
   // 1. Add Customer Record
   customersSheet.appendRow([
@@ -1167,4 +1234,632 @@ function sheetToJson(sheet) {
     result.push(obj);
   }
   return result;
+}
+
+// ============================================================================
+// STAGE 3C: MACHINE-TO-MACHINE FIRESTORE -> GOOGLE SHEETS SYNCHRONIZATION
+// ============================================================================
+
+/**
+ * Canonicalizes an arbitrary JSON object/array/value recursively with sorted keys.
+ * Produces an exact, deterministic string representation.
+ */
+function canonicalizeJson(obj) {
+  if (obj === null || typeof obj !== 'object') {
+    return JSON.stringify(obj);
+  }
+  if (Array.isArray(obj)) {
+    var elements = [];
+    for (var i = 0; i < obj.length; i++) {
+      elements.push(canonicalizeJson(obj[i]));
+    }
+    return '[' + elements.join(',') + ']';
+  }
+  var keys = Object.keys(obj).sort();
+  var pairs = [];
+  for (var k = 0; k < keys.length; k++) {
+    var key = keys[k];
+    pairs.push(JSON.stringify(key) + ':' + canonicalizeJson(obj[key]));
+  }
+  return '{' + pairs.join(',') + '}';
+}
+
+/**
+ * Computes lowercase hex SHA-256 digest of a string
+ */
+function computeSha256Hex(str) {
+  var bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, str, Utilities.Charset.UTF_8);
+  return bytesToHex(bytes);
+}
+
+/**
+ * Validates incoming request using cryptographic HMAC-SHA256 payload signature.
+ * Protects against tampering and replay attacks.
+ * Secret is stored strictly in Script Properties (SHEET_SYNC_SECRET).
+ * Secret is NEVER transmitted over the wire, logged, or returned in responses.
+ */
+function assertHmacAuth(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Unauthorized: Missing request payload.');
+  }
+
+  var auth = payload.auth;
+  if (!auth || typeof auth !== 'object') {
+    throw new Error('Unauthorized: Missing authentication envelope.');
+  }
+
+  var timestamp = Number(auth.timestamp);
+  var nonce = auth.nonce;
+  var signature = auth.signature;
+
+  if (!timestamp || !nonce || !signature) {
+    throw new Error('Unauthorized: Incomplete authentication parameters (timestamp, nonce, signature required).');
+  }
+
+  // 1. Freshness Check: 5-minute (300,000 ms) safety window
+  var now = new Date().getTime();
+  if (Math.abs(now - timestamp) > 300000) {
+    throw new Error('Unauthorized: Request timestamp expired or clock skew exceeded 5 minutes.');
+  }
+
+  // 2. Replay Protection: Check if nonce was already consumed within the validity window
+  try {
+    var cache = CacheService.getScriptCache();
+    var cacheKey = 'sync_nonce_' + nonce;
+    if (cache && cache.get(cacheKey)) {
+      throw new Error('Unauthorized: Replay detected. Nonce has already been processed.');
+    }
+    if (cache) {
+      cache.put(cacheKey, '1', 360); // 6 minutes TTL
+    }
+  } catch (cacheErr) {
+    if (cacheErr.message && cacheErr.message.indexOf('Replay detected') !== -1) {
+      throw cacheErr;
+    }
+  }
+
+  // 3. Retrieve Secret from Script Properties
+  var props = PropertiesService.getScriptProperties();
+  var configuredSecret = props.getProperty('SHEET_SYNC_SECRET');
+  if (!configuredSecret) {
+    throw new Error('Unauthorized: SHEET_SYNC_SECRET is not configured in Script Properties.');
+  }
+
+  // 4. Compute Payload Hash (Canonical representation of entities)
+  var canonicalEntities = canonicalizeJson(payload.entities || {});
+  var payloadHash = computeSha256Hex(canonicalEntities);
+
+  // 5. Construct Canonical Message to Sign
+  var messageToSign = [
+    payload.action || '',
+    payload.batchId || '',
+    String(timestamp),
+    nonce,
+    payload.spreadsheetId || '',
+    payloadHash,
+  ].join(':');
+
+  // 6. Compute HMAC-SHA256 Signature
+  var rawBytes = Utilities.computeHmacSha256Signature(messageToSign, configuredSecret.trim(), Utilities.Charset.UTF_8);
+  var expectedSignature = bytesToHex(rawBytes);
+
+  // 7. Constant-Time Signature Comparison
+  if (!safeCompareStrings(signature.trim().toLowerCase(), expectedSignature.trim().toLowerCase())) {
+    throw new Error('Unauthorized: Invalid cryptographic HMAC signature.');
+  }
+}
+
+/**
+ * Constant-time string comparison to prevent timing side-channel attacks
+ */
+function safeCompareStrings(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  var diff = 0;
+  for (var i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+/**
+ * Batch synchronization entry point for Firestore records.
+ * Uses deterministic Primary-Key based in-place upsert.
+ * Preserves all historical rows; NEVER uses clear(), clearContents(), or delete operations.
+ */
+function handleSyncFirestoreBatch(payload) {
+  var ss = getDbSpreadsheet();
+  initAllSheets(ss);
+
+  var results = {};
+  var entities = payload.entities || {};
+
+  // Support single-entity payload format
+  if (payload.entity && payload.records) {
+    entities[payload.entity] = payload.records;
+  }
+
+  var entityConfig = {
+    customers: {
+      sheetName: 'Customers',
+      pkField: 'customerId',
+      mapFn: mapCustomerToRow,
+    },
+    subscriptions: {
+      sheetName: 'Subscriptions',
+      pkField: 'subscriptionId',
+      mapFn: mapSubscriptionToRow,
+    },
+    subscriptionCategories: {
+      sheetName: 'SubscriptionCategories',
+      pkField: 'entitlementId',
+      mapFn: mapSubscriptionCategoryToRow,
+    },
+    payments: {
+      sheetName: 'Payments',
+      pkField: 'paymentId',
+      mapFn: mapPaymentToRow,
+    },
+    paymentOrders: {
+      sheetName: 'PaymentOrders',
+      pkField: 'orderId',
+      mapFn: mapPaymentOrderToRow,
+    },
+    dailyNewsPackages: {
+      sheetName: 'DailyNewsPackages',
+      pkField: 'packageId',
+      mapFn: mapDailyNewsPackageToRow,
+    },
+    newsStories: {
+      sheetName: 'DailyNews',
+      pkField: 'storyId',
+      mapFn: mapNewsStoryToRow,
+    },
+    telegramDeliveryLogs: {
+      sheetName: 'DeliveryLogs',
+      pkField: 'logId',
+      mapFn: mapDeliveryLogToRow,
+    },
+    telegramConnectionTokens: {
+      sheetName: 'TelegramTokens',
+      pkField: 'token',
+      mapFn: mapTelegramTokenToRow,
+    },
+    categoryTransferAudits: {
+      sheetName: 'CategoryTransferAudits',
+      pkField: 'auditId',
+      mapFn: mapCategoryTransferAuditToRow,
+    },
+    systemScheduler: {
+      sheetName: 'SystemScheduler',
+      pkField: 'stateId',
+      mapFn: mapSystemSchedulerToRow,
+    },
+  };
+
+  for (var entityName in entities) {
+    var records = entities[entityName];
+    if (!Array.isArray(records) || records.length === 0) continue;
+
+    var config = entityConfig[entityName];
+    if (!config) {
+      results[entityName] = { ok: false, error: 'Unknown entity type: ' + entityName };
+      continue;
+    }
+
+    var sheet = ss.getSheetByName(config.sheetName);
+    if (!sheet) {
+      results[entityName] = { ok: false, error: 'Sheet not found: ' + config.sheetName };
+      continue;
+    }
+
+    var stats = upsertRecordsToSheet(sheet, records, config.pkField, config.mapFn);
+    results[entityName] = stats;
+  }
+
+  return {
+    ok: true,
+    batchId: payload.batchId || ('batch_' + new Date().getTime()),
+    syncedAt: new Date().toISOString(),
+    results: results,
+  };
+}
+
+/**
+ * Deterministic Primary-Key Upsert Engine:
+ * 1. Reads existing keys into an in-memory index map.
+ * 2. If row exists with matching PK, updates in-place via setValues().
+ * 3. If new PK, appends row via appendRow().
+ * 4. Zero deletions or sheet clearing.
+ */
+function upsertRecordsToSheet(sheet, records, pkField, mapFn) {
+  var lastRow = sheet.getLastRow();
+  var pkToRow = {};
+
+  if (lastRow > 1) {
+    var pkValues = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var r = 0; r < pkValues.length; r++) {
+      var val = String(pkValues[r][0]).trim();
+      if (val) {
+        pkToRow[val] = r + 2; // 1-based sheet row index
+      }
+    }
+  }
+
+  var updatedCount = 0;
+  var insertedCount = 0;
+
+  for (var i = 0; i < records.length; i++) {
+    var rec = records[i];
+    var pkVal = String(rec[pkField] || '').trim();
+    if (!pkVal && pkField === 'storyId') {
+      pkVal = String(rec.newsDate || '') + '_' + String(rec.categoryId || '') + '_' + String(rec.headline || '').substring(0, 30);
+    }
+    if (!pkVal) continue;
+
+    var rowData = mapFn(rec);
+    var existingRow = pkToRow[pkVal];
+
+    if (existingRow) {
+      sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+      updatedCount++;
+    } else {
+      sheet.appendRow(rowData);
+      var newRowIdx = sheet.getLastRow();
+      pkToRow[pkVal] = newRowIdx;
+      insertedCount++;
+    }
+  }
+
+  return {
+    ok: true,
+    total: records.length,
+    inserted: insertedCount,
+    updated: updatedCount,
+  };
+}
+
+// ----------------------------------------------------------------------------
+// Entity Field -> Sheet Column Mapping Functions
+// ----------------------------------------------------------------------------
+
+function mapCustomerToRow(c) {
+  return [
+    c.customerId || '',
+    c.customerSecretToken || c.customerAuthToken || '',
+    c.fullName || '',
+    c.email || '',
+    c.mobileCountryCode || '+91',
+    c.mobileNumber || '',
+    c.telegramChatId || '',
+    c.telegramUsername || '',
+    c.accountStatus || 'trial',
+    c.createdAt || '',
+    c.updatedAt || ''
+  ];
+}
+
+function mapSubscriptionToRow(s) {
+  return [
+    s.subscriptionId || '',
+    s.customerId || '',
+    s.cycleType || 'trial',
+    s.parentSubscriptionId || '',
+    s.state || s.status || 'trial_active',
+    s.trialStartDate || '',
+    s.trialEndDate || '',
+    s.day3ReminderSent ? true : false,
+    s.day3ReminderSentAt || '',
+    s.customerReportedPaymentDate || '',
+    s.adminConfirmedPaymentDate || '',
+    s.bufferStartDate || '',
+    s.bufferEndDate || '',
+    s.paidStartDate || '',
+    s.paidExpiryDate || s.paidEndDate || '',
+    s.renewalReminderSent ? true : false,
+    s.renewalReminderSentAt || '',
+    s.createdAt || '',
+    s.updatedAt || ''
+  ];
+}
+
+function mapSubscriptionCategoryToRow(sc) {
+  var entitlementId = sc.entitlementId || (sc.subscriptionId + '_' + sc.categoryId);
+  return [
+    entitlementId,
+    sc.subscriptionId || '',
+    sc.customerId || '',
+    sc.categoryId || '',
+    sc.categoryName || '',
+    sc.status || 'active',
+    sc.assignedAt || sc.createdAt || ''
+  ];
+}
+
+function mapPaymentToRow(p) {
+  return [
+    p.paymentId || '',
+    p.subscriptionId || '',
+    p.customerId || '',
+    p.configVersion || 1,
+    p.basePriceAtPayment || p.amount || 0,
+    p.gstRateAtPayment || 18,
+    p.gstAmountAtPayment || 0,
+    p.totalAmountPaid || p.amount || 0,
+    p.currency || 'INR',
+    p.paymentMethod || 'upi_manual',
+    p.destinationVpaOrAccount || '',
+    p.utrReference || p.gatewayReference || '',
+    p.customerReportedPaymentDate || p.paymentDate || '',
+    p.adminConfirmedPaymentDate || '',
+    p.verificationStatus || p.paymentStatus || 'pending',
+    p.verifiedAt || '',
+    p.verifiedBy || '',
+    p.notes || ''
+  ];
+}
+
+function mapPaymentOrderToRow(po) {
+  return [
+    po.orderId || '',
+    po.customerId || '',
+    po.amount || 0,
+    po.currency || 'INR',
+    po.status || 'created',
+    po.utrReference || '',
+    po.createdAt || '',
+    po.updatedAt || ''
+  ];
+}
+
+function mapDailyNewsPackageToRow(dnp) {
+  return [
+    dnp.packageId || '',
+    dnp.newsDate || '',
+    dnp.generatedAt || '',
+    dnp.stories ? dnp.stories.length : (dnp.totalStories || 0),
+    Array.isArray(dnp.categoryIds) ? dnp.categoryIds.join(', ') : (dnp.categoryIds || ''),
+    dnp.status || 'published'
+  ];
+}
+
+function mapNewsStoryToRow(story) {
+  return [
+    story.newsDate || '',
+    story.categoryId || '',
+    story.headline || '',
+    story.summary || '',
+    story.sourceName || '',
+    story.sourceUrl || '',
+    story.createdAt || new Date().toISOString()
+  ];
+}
+
+function mapDeliveryLogToRow(dl) {
+  return [
+    dl.logId || '',
+    dl.timestamp || dl.deliveredAt || '',
+    dl.customerId || '',
+    dl.telegramChatId || '',
+    dl.categoryId || '',
+    dl.deliveryType || 'daily_briefing',
+    dl.status || '',
+    dl.error || ''
+  ];
+}
+
+function mapTelegramTokenToRow(tok) {
+  return [
+    tok.token || '',
+    tok.customerId || '',
+    tok.expiresAt || '',
+    tok.used ? true : false,
+    tok.usedAt || '',
+    tok.createdAt || ''
+  ];
+}
+
+function mapCategoryTransferAuditToRow(a) {
+  return [
+    a.auditId || '',
+    a.customerId || '',
+    a.previousCategoryId || '',
+    a.newCategoryId || '',
+    a.transferredBy || '',
+    a.reason || '',
+    a.timestamp || ''
+  ];
+}
+
+function mapSystemSchedulerToRow(ss) {
+  return [
+    ss.stateId || 'global_scheduler',
+    ss.lastGenerationDate || '',
+    ss.lastDeliveryDate || '',
+    ss.lastDay3EvaluationDate || '',
+    new Date().toISOString(),
+    ss.updatedAt || new Date().toISOString()
+  ];
+}
+
+// ============================================================================
+// STAGE 3A: SCHEDULED NEWS & REMINDER ORCHESTRATION (CLOUD RUN TRIGGER)
+// ============================================================================
+
+/**
+ * Triggers an operation on the authoritative Cloud Run scheduler endpoint.
+ * Authenticates via the secret stored in Apps Script Script Properties (APPS_SCRIPT_SCHEDULER_SECRET).
+ * Bounded retry (max 2 retries) on transient 5xx/network errors only. Never retries 401/403 or 200.
+ */
+function callCloudRunScheduler(action) {
+  var baseUrl = getProperty('CLOUD_RUN_SERVICE_URL', 'https://ais-dev-yhopij5yks7yremfckkcgh-532434283453.asia-southeast1.run.app');
+  var url = baseUrl.replace(/\/+$/, '') + '/api/admin/scheduler/trigger';
+  var secret = getProperty('APPS_SCRIPT_SCHEDULER_SECRET');
+
+  if (!secret) {
+    console.error('[Scheduler Error] APPS_SCRIPT_SCHEDULER_SECRET is not configured in Script Properties.');
+    return { ok: false, error: 'APPS_SCRIPT_SCHEDULER_SECRET_MISSING' };
+  }
+
+  var options = {
+    method: 'post',
+    contentType: 'application/json',
+    headers: {
+      'X-Scheduler-Token': secret
+    },
+    payload: JSON.stringify({ action: action }),
+    muteHttpExceptions: true
+  };
+
+  var maxAttempts = 3;
+  var lastResult = null;
+
+  for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      var response = UrlFetchApp.fetch(url, options);
+      var code = response.getResponseCode();
+      var responseText = response.getContentText();
+      var json = null;
+
+      try {
+        json = JSON.parse(responseText);
+      } catch (e) {
+        json = { raw: responseText };
+      }
+
+      // Success
+      if (code >= 200 && code < 300 && json && json.ok === true) {
+        console.log('[Scheduler Success] Action ' + action + ' succeeded on attempt ' + attempt);
+        return { ok: true, code: code, data: json };
+      }
+
+      // Non-retryable client errors (401, 403, 400)
+      if (code === 401 || code === 403 || code === 400) {
+        console.error('[Scheduler Auth/Client Error] HTTP ' + code + ': ' + responseText);
+        return { ok: false, code: code, error: responseText, retryable: false };
+      }
+
+      // Transient server error (5xx)
+      console.warn('[Scheduler Attempt ' + attempt + '] HTTP ' + code + ': ' + responseText);
+      lastResult = { ok: false, code: code, error: responseText, retryable: true };
+
+      if (attempt < maxAttempts) {
+        Utilities.sleep(1500 * attempt);
+      }
+    } catch (networkErr) {
+      console.warn('[Scheduler Network Attempt ' + attempt + '] Error: ' + networkErr.toString());
+      lastResult = { ok: false, error: networkErr.toString(), retryable: true };
+
+      if (attempt < maxAttempts) {
+        Utilities.sleep(1500 * attempt);
+      }
+    }
+  }
+
+  return lastResult || { ok: false, error: 'Unknown scheduler failure' };
+}
+
+/**
+ * Daily Morning News Cycle Trigger Handler (~06:00 AM Asia/Kolkata)
+ * 1. Calls Cloud Run with action: "generate"
+ * 2. Checks response for successful generation
+ * 3. Only if generation succeeds, calls action: "deliver"
+ * Sequential dependency ensures news delivery is NEVER called if generation fails.
+ */
+function scheduledMorningNewsCycle() {
+  console.log('[Morning News Cycle] Starting scheduled news generation...');
+  var genResult = callCloudRunScheduler('generate');
+
+  if (!genResult || genResult.ok !== true) {
+    console.error('[Morning News Cycle Aborted] News generation failed. Delivery skipped.', JSON.stringify(genResult));
+    return { ok: false, phase: 'generate', error: genResult ? genResult.error : 'Generation failed' };
+  }
+
+  console.log('[Morning News Cycle] News generation verified. Proceeding to delivery dispatch...');
+  var delResult = callCloudRunScheduler('deliver');
+
+  if (!delResult || delResult.ok !== true) {
+    console.error('[Morning News Cycle Warning] News delivery reported issue:', JSON.stringify(delResult));
+    return { ok: false, phase: 'deliver', error: delResult ? delResult.error : 'Delivery failed' };
+  }
+
+  console.log('[Morning News Cycle Completed] Generation and delivery succeeded.');
+  return { ok: true, generation: genResult.data, delivery: delResult.data };
+}
+
+/**
+ * Daily Noon Reminder Cycle Trigger Handler (~12:00 PM Asia/Kolkata)
+ * Calls Cloud Run with action: "reminders" for Day-3 trial evaluation.
+ */
+function scheduledNoonRemindersCycle() {
+  console.log('[Noon Reminders Cycle] Starting scheduled Day-3 reminder evaluation...');
+  var remResult = callCloudRunScheduler('reminders');
+
+  if (!remResult || remResult.ok !== true) {
+    console.error('[Noon Reminders Cycle] Reminder evaluation reported issue:', JSON.stringify(remResult));
+    return { ok: false, error: remResult ? remResult.error : 'Reminders failed' };
+  }
+
+  console.log('[Noon Reminders Cycle Completed] Day-3 reminders processed.');
+  return { ok: true, data: remResult.data };
+}
+
+/**
+ * Installs the two authoritative Stage 3A time-driven triggers.
+ * Inspects existing triggers and removes any duplicates.
+ * Guarantees exactly one scheduledMorningNewsCycle and one scheduledNoonRemindersCycle trigger.
+ * Keeps legacy cronDailyDelivery dormant.
+ */
+function installStage3ASchedulerTriggers() {
+  var triggers = ScriptApp.getProjectTriggers();
+  var morningInstalled = false;
+  var noonInstalled = false;
+
+  for (var i = 0; i < triggers.length; i++) {
+    var fnName = triggers[i].getHandlerFunction();
+    if (fnName === 'scheduledMorningNewsCycle') {
+      if (!morningInstalled) {
+        morningInstalled = true;
+      } else {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    } else if (fnName === 'scheduledNoonRemindersCycle') {
+      if (!noonInstalled) {
+        noonInstalled = true;
+      } else {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    } else if (fnName === 'cronDailyDelivery') {
+      // Remove any accidental legacy trigger
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+
+  if (!morningInstalled) {
+    ScriptApp.newTrigger('scheduledMorningNewsCycle')
+      .timeBased()
+      .everyDays(1)
+      .atHour(6)
+      .inTimezone('Asia/Kolkata')
+      .create();
+    console.log('[Trigger Setup] Created scheduledMorningNewsCycle trigger at ~06:00 Asia/Kolkata.');
+  }
+
+  if (!noonInstalled) {
+    ScriptApp.newTrigger('scheduledNoonRemindersCycle')
+      .timeBased()
+      .everyDays(1)
+      .atHour(12)
+      .inTimezone('Asia/Kolkata')
+      .create();
+    console.log('[Trigger Setup] Created scheduledNoonRemindersCycle trigger at ~12:00 Asia/Kolkata.');
+  }
+
+  var finalTriggers = ScriptApp.getProjectTriggers().map(function(t) { return t.getHandlerFunction(); });
+  return {
+    ok: true,
+    morningInstalled: true,
+    noonInstalled: true,
+    activeTriggers: finalTriggers
+  };
 }

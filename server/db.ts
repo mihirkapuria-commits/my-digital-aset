@@ -370,6 +370,50 @@ export function getDb(): MyDigitAssetDatabase {
 // SANITIZATION & INPUT VALIDATION (Section 3, 14, 18)
 // ============================================================================
 
+export function normalizePhone(countryCode: string, mobileNumber: string): string {
+  const cc = (countryCode || '+91').replace(/[^0-9]/g, '');
+  const num = (mobileNumber || '').replace(/[^0-9]/g, '');
+  return `${cc}${num}`;
+}
+
+export interface CustomerProfileDTO {
+  customerId: string;
+  fullName: string;
+  email: string;
+  mobileCountryCode: string;
+  mobileNumber: string;
+  telegramConnected: boolean;
+  accountStatus: string;
+  trialStartDate?: string;
+  trialEndDate?: string;
+  trialStatus?: string;
+  selectedCategoryIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Sanitizes customer record into a strict, minimal DTO.
+ * Explicitly strips telegramChatId, customerAuthToken, row numbers, and admin notes.
+ */
+export function toCustomerProfileDTO(customer: Customer): CustomerProfileDTO {
+  return {
+    customerId: customer.customerId,
+    fullName: customer.fullName,
+    email: customer.email,
+    mobileCountryCode: customer.mobileCountryCode,
+    mobileNumber: customer.mobileNumber,
+    telegramConnected: Boolean(customer.telegramConnected || (customer.telegramChatId && customer.telegramChatId.length > 0)),
+    accountStatus: customer.accountStatus,
+    trialStartDate: customer.trialStartDate,
+    trialEndDate: customer.trialEndDate,
+    trialStatus: customer.trialStatus,
+    selectedCategoryIds: customer.selectedCategoryIds || [],
+    createdAt: customer.createdAt,
+    updatedAt: customer.updatedAt,
+  };
+}
+
 export function sanitizeText(input: string): string {
   if (!input || typeof input !== 'string') return '';
   return input
@@ -449,16 +493,37 @@ export function registerOrLoginCustomer(input: {
 }): { customer: Customer; sessionToken: string } {
   const db = getDb();
   const now = new Date().toISOString();
+  const normalizedEmail = (input.email || '').toLowerCase().trim();
+  const inputPhone = normalizePhone(input.mobileCountryCode, input.mobileNumber);
 
-  let customer = db.customers.find((c) => c.email.toLowerCase() === input.email.toLowerCase());
+  // 1. Check if email belongs to an existing customer
+  const customerByEmail = db.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
 
-  if (customer) {
-    // Existing customer: update details
-    customer.fullName = input.fullName;
-    customer.mobileCountryCode = input.mobileCountryCode;
-    customer.mobileNumber = input.mobileNumber;
-    customer.selectedCategoryIds = input.selectedCategoryIds;
-    customer.updatedAt = now;
+  // 2. Check if phone belongs to an existing customer
+  const customerByPhone = db.customers.find((c) => normalizePhone(c.mobileCountryCode, c.mobileNumber) === inputPhone);
+
+  // SECURITY RULE 1: If Email A belongs to Customer A, but submitted phone belongs to Customer B (B !== A),
+  // reject with safe generic error. Never merge Customer A and Customer B!
+  if (customerByEmail && customerByPhone && customerByEmail.customerId !== customerByPhone.customerId) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
+
+  // SECURITY RULE 2: If Email is new, but submitted phone belongs to an existing customer (Customer B),
+  // reject with safe generic error. Never reassign Customer B's phone number!
+  if (!customerByEmail && customerByPhone) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
+
+  let customer: Customer;
+  if (customerByEmail) {
+    // Existing customer re-login
+    // SECURITY RULE 3: An existing customer's phone number may only be changed after successful authentication.
+    // Unauthenticated registration/login MUST NOT change the phone number.
+    customerByEmail.fullName = input.fullName || customerByEmail.fullName;
+    customerByEmail.selectedCategoryIds = input.selectedCategoryIds || customerByEmail.selectedCategoryIds;
+    customerByEmail.updatedAt = now;
+    // Note: customerId, email, mobileCountryCode, mobileNumber, and trialStartDate remain strictly preserved!
+    customer = customerByEmail;
   } else {
     // New customer: create record with 3-day complimentary trial
     const trialEnd = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString();
@@ -522,40 +587,55 @@ export async function atomicRegisterOrLoginCustomer(input: {
   const firestore = getFirestoreDb();
   const db = getDb();
   const now = new Date().toISOString();
-  const normalizedEmail = input.email.toLowerCase();
+  const normalizedEmail = input.email.toLowerCase().trim();
+  const inputPhone = normalizePhone(input.mobileCountryCode, input.mobileNumber);
 
-  // Look up in-memory first
-  let existingCustomer = db.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
+  // 1. Check if email belongs to an existing customer
+  const customerByEmail = db.customers.find((c) => c.email.toLowerCase() === normalizedEmail);
 
-  if (existingCustomer) {
-    existingCustomer.fullName = input.fullName;
-    existingCustomer.mobileCountryCode = input.mobileCountryCode;
-    existingCustomer.mobileNumber = input.mobileNumber;
-    existingCustomer.selectedCategoryIds = input.selectedCategoryIds;
-    existingCustomer.updatedAt = now;
+  // 2. Check if phone belongs to an existing customer
+  const customerByPhone = db.customers.find((c) => normalizePhone(c.mobileCountryCode, c.mobileNumber) === inputPhone);
+
+  // SECURITY RULE 1: If Email A belongs to Customer A, but submitted phone belongs to Customer B (B !== A),
+  // reject with safe generic error. Never merge Customer A and Customer B!
+  if (customerByEmail && customerByPhone && customerByEmail.customerId !== customerByPhone.customerId) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
+
+  // SECURITY RULE 2: If Email is new, but submitted phone belongs to an existing customer (Customer B),
+  // reject with safe generic error. Never reassign Customer B's phone number!
+  if (!customerByEmail && customerByPhone) {
+    throw new Error('Registration failed: The provided contact details are associated with an existing account. Please verify your details or log in.');
+  }
+
+  if (customerByEmail) {
+    customerByEmail.fullName = input.fullName || customerByEmail.fullName;
+    customerByEmail.selectedCategoryIds = input.selectedCategoryIds || customerByEmail.selectedCategoryIds;
+    customerByEmail.updatedAt = now;
+    // Preserves phone number and customerId
 
     const sessionToken = crypto.randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const sessionObj: CustomerSession = {
       sessionToken,
-      customerId: existingCustomer.customerId,
+      customerId: customerByEmail.customerId,
       createdAt: now,
       expiresAt,
     };
 
     db.customerSessions = db.customerSessions.filter(
-      (s) => s.customerId !== existingCustomer!.customerId || new Date(s.expiresAt) > new Date()
+      (s) => s.customerId !== customerByEmail.customerId || new Date(s.expiresAt) > new Date()
     );
     db.customerSessions.push(sessionObj);
-    existingCustomer.customerAuthToken = sessionToken;
+    customerByEmail.customerAuthToken = sessionToken;
 
     saveDb();
     await Promise.all([
-      persistDocToFirestore('customers', existingCustomer.customerId, existingCustomer),
+      persistDocToFirestore('customers', customerByEmail.customerId, customerByEmail),
       persistDocToFirestore('customerSessions', sessionToken, sessionObj),
     ]);
 
-    return { customer: existingCustomer, sessionToken };
+    return { customer: customerByEmail, sessionToken };
   }
 
   // Create new customer using transaction to prevent duplicate identities
@@ -670,6 +750,15 @@ export function updateCustomerMobile(
   const mobileDigits = (mobileNumber || '').replace(/[^0-9]/g, '');
   if (!mobileDigits || mobileDigits.length < 7 || mobileDigits.length > 15) {
     return { success: false, error: 'Invalid mobile number.' };
+  }
+
+  // Prevent attaching a phone number that already belongs to another customer
+  const targetPhone = normalizePhone(countryCode, mobileDigits);
+  const conflict = db.customers.find(
+    (c) => c.customerId !== customerId && normalizePhone(c.mobileCountryCode, c.mobileNumber) === targetPhone
+  );
+  if (conflict) {
+    return { success: false, error: 'This mobile number is already linked to another customer account.' };
   }
 
   customer.mobileCountryCode = countryCode;

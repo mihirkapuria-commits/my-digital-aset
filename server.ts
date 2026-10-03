@@ -11,6 +11,7 @@ import {
   validateAdminSession,
   invalidateAdminSession,
   requireAdminAuth,
+  requireSchedulerOrAdminAuth,
   getAuthorizedAdminEmail,
   recordSecurityLog,
   getSecurityLogs,
@@ -98,6 +99,11 @@ import {
   getSchedulerStatus,
   triggerManualSchedulerRun,
 } from './server/schedulerService.js';
+import {
+  getSheetSyncCheckpoint,
+  executeFirestoreToSheetSync,
+  TARGET_SPREADSHEET_ID,
+} from './server/sheetSyncService.js';
 
 // Initialize the core MyDigitAsset persistent database
 initDb();
@@ -1697,15 +1703,56 @@ async function startServer() {
 
   /**
    * POST /api/admin/scheduler/trigger
-   * Triggers manual execution cycle
+   * Triggers scheduled execution cycle.
+   * Authenticated via Google Cloud Scheduler OIDC Service Account Bearer Token OR Admin Session.
    */
-  app.post('/api/admin/scheduler/trigger', requireAdminAuth, async (req, res) => {
-    const { newsDate } = req.body || {};
+  app.post('/api/admin/scheduler/trigger', requireSchedulerOrAdminAuth, async (req, res) => {
+    const { newsDate, action } = req.body || {};
     try {
-      const result = await triggerManualSchedulerRun(newsDate);
+      const result = await triggerManualSchedulerRun(newsDate, action || 'all');
       return res.json({ ok: true, result });
     } catch (err: any) {
       return res.status(500).json({ ok: false, error: err.message || 'Trigger error' });
+    }
+  });
+
+  /**
+   * GET /api/admin/sheet-sync/status
+   * Stage 3C: Returns current Firestore -> Google Sheet synchronization state and stats.
+   * NEVER returns or exposes secrets.
+   */
+  app.get('/api/admin/sheet-sync/status', requireAdminAuth, async (_req, res) => {
+    try {
+      const checkpoint = await getSheetSyncCheckpoint();
+      return res.json({
+        ok: true,
+        spreadsheetId: TARGET_SPREADSHEET_ID,
+        configured: Boolean(process.env.APPS_SCRIPT_WEBAPP_URL),
+        secretConfigured: Boolean(process.env.SHEET_SYNC_SECRET),
+        lastSyncStartedAt: checkpoint.lastSyncStartedAt,
+        lastSyncCompletedAt: checkpoint.lastSyncCompletedAt,
+        lastSyncStatus: checkpoint.lastSyncStatus,
+        lastSyncError: checkpoint.lastSyncError,
+        totalSyncRuns: checkpoint.totalSyncRuns,
+        highWaterMarks: checkpoint.highWaterMarks,
+        lastStats: checkpoint.lastStats,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'Failed to retrieve sync status' });
+    }
+  });
+
+  /**
+   * POST /api/admin/sheet-sync/trigger
+   * Stage 3C: Manually triggers Firestore -> Google Sheet synchronization cycle.
+   */
+  app.post('/api/admin/sheet-sync/trigger', requireAdminAuth, async (req, res) => {
+    const forceFullSync = Boolean(req.body && req.body.forceFullSync);
+    try {
+      const result = await executeFirestoreToSheetSync({ forceFullSync });
+      return res.json(result);
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'Failed to execute sheet sync' });
     }
   });
 

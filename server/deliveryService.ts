@@ -18,6 +18,11 @@ import {
   getKolkataDateString,
   formatCategoryNewsTelegramMessage,
 } from './newsService.js';
+import {
+  atomicReserveOperation,
+  atomicCompleteOperation,
+  atomicReleaseReservation,
+} from './idempotencyService.js';
 
 /**
  * Result of delivering a category news briefing to a customer
@@ -56,7 +61,7 @@ export async function deliverCategoryNewsToCustomer(params: {
   const db = getDb();
   const newsDate = params.newsDate || getKolkataDateString(params.referenceDate || new Date());
   const refDate = params.referenceDate || new Date();
-  const deliveryId = `del_${crypto.randomBytes(8).toString('hex')}`;
+  const deliveryId = `del_${newsDate}_${params.customerId}_${params.categoryId}`;
   const now = new Date().toISOString();
 
   // Helper to record immutable, append-only delivery log
@@ -147,17 +152,25 @@ export async function deliverCategoryNewsToCustomer(params: {
 
   const destinationChatId = customer.telegramChatId;
 
-  // Retrieve the generated news package for this category and date
+  // Retrieve the generated news package for this category and date (both full and partial packages are deliverable)
   const newsPkg = db.dailyNewsPackages.find(
-    (p) => p.categoryId === params.categoryId && p.newsDate === newsDate && p.generationStatus === 'success'
+    (p) =>
+      p.categoryId === params.categoryId &&
+      p.newsDate === newsDate &&
+      (p.generationStatus === 'success' || p.generationStatus === 'partial')
   );
 
   if (!newsPkg) {
-    return recordLog(
-      'failed',
-      destinationChatId,
-      `News package for category '${params.categoryId}' on ${newsDate} has not been generated yet.`
+    const failedPkg = db.dailyNewsPackages.find(
+      (p) => p.categoryId === params.categoryId && p.newsDate === newsDate && p.generationStatus === 'failed'
     );
+    const failureReason =
+      failedPkg?.errorMessage ||
+      `News package for category '${params.categoryId}' on ${newsDate} has not been generated yet.`;
+    console.error(
+      `[DELIVERY_FAILURE] Customer ${params.customerId} for category ${params.categoryId}: ${failureReason}`
+    );
+    return recordLog('failed', destinationChatId, failureReason);
   }
 
   const stories = db.newsStories
@@ -165,6 +178,9 @@ export async function deliverCategoryNewsToCustomer(params: {
     .sort((a, b) => a.position - b.position);
 
   if (stories.length === 0) {
+    console.error(
+      `[GENUINE_NO_USABLE_NEWS_FAILURE] Package '${newsPkg.packageId}' contains 0 stories. Empty briefing delivery blocked.`
+    );
     return recordLog(
       'failed',
       destinationChatId,
@@ -179,6 +195,25 @@ export async function deliverCategoryNewsToCustomer(params: {
     stories
   );
 
+  // Atomic check-and-reserve for del_<newsDate>_<customerId>_<categoryId>
+  // Prevents concurrent scheduler executions from duplicate sends
+  const reservation = await atomicReserveOperation(deliveryId, {
+    metadata: {
+      customerId: params.customerId,
+      categoryId: params.categoryId,
+      newsDate,
+      telegramChatId: destinationChatId,
+    },
+  });
+
+  if (!reservation.reserved) {
+    return recordLog(
+      'skipped',
+      destinationChatId,
+      'Delivery already in progress or completed by another instance.'
+    );
+  }
+
   // Section 16 & 28: Dispatch message to individual Telegram Chat ID with rate limiting and backoff
   const sendRes = await sendTelegramMessage(destinationChatId, messageText, {
     maxRetries: 3,
@@ -186,9 +221,14 @@ export async function deliverCategoryNewsToCustomer(params: {
   });
 
   if (!sendRes.success) {
+    await atomicReleaseReservation(deliveryId, sendRes.error);
+    console.error(
+      `[DELIVERY_FAILURE] Telegram dispatch failed for customer ${params.customerId}, chat ${destinationChatId}: ${sendRes.error}`
+    );
     return recordLog('failed', destinationChatId, sendRes.error || 'Failed to dispatch message via Telegram API.');
   }
 
+  await atomicCompleteOperation(deliveryId, { telegramMessageId: sendRes.telegramMessageId });
   return recordLog('sent', destinationChatId, undefined, sendRes.telegramMessageId);
 }
 

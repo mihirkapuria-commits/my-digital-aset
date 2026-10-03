@@ -321,7 +321,7 @@ export async function evaluateAndRunDailySchedule(
     if (isMorningWindow) {
       const db = getDb();
       const existingPackages = db.dailyNewsPackages.filter(
-        (p) => p.newsDate === kolkataDate && p.generationStatus === 'success'
+        (p) => p.newsDate === kolkataDate && (p.generationStatus === 'success' || p.generationStatus === 'partial')
       );
 
       // Generation Check (starts at 06:00 AM IST)
@@ -402,24 +402,40 @@ export function getSchedulerStatus(): SchedulerState & {
 }
 
 /**
- * Allows an authorized admin to trigger a manual immediate cycle
+ * Allows an authorized scheduler or admin to trigger a run (or specific action)
  */
-export async function triggerManualSchedulerRun(targetDate?: string): Promise<{
+export async function triggerManualSchedulerRun(
+  targetDate?: string,
+  action: 'all' | 'generate' | 'deliver' | 'reminders' = 'all'
+): Promise<{
   newsDate: string;
-  generationResult: any;
-  deliveryResult: any;
-  reminderResult: any;
+  action: string;
+  generationResult?: any;
+  deliveryResult?: any;
+  reminderResult?: any;
 }> {
   const newsDate = targetDate || getKolkataDateString();
-  const generationResult = await generateDailyAllCategoriesNews(newsDate);
-  const deliveryResult = await deliverDailyBriefingsToAllEligibleCustomers(newsDate);
-  const reminderResult = await evaluateAndSendDay3TrialReminders();
+  let generationResult: any = null;
+  let deliveryResult: any = null;
+  let reminderResult: any = null;
 
-  state.lastGenerationDate = newsDate;
-  state.lastDeliveryDate = newsDate;
+  if (action === 'all' || action === 'generate') {
+    generationResult = await generateDailyAllCategoriesNews(newsDate);
+    state.lastGenerationDate = newsDate;
+  }
+
+  if (action === 'all' || action === 'deliver') {
+    deliveryResult = await deliverDailyBriefingsToAllEligibleCustomers(newsDate);
+    state.lastDeliveryDate = newsDate;
+  }
+
+  if (action === 'all' || action === 'reminders') {
+    reminderResult = await evaluateAndSendDay3TrialReminders();
+  }
 
   return {
     newsDate,
+    action,
     generationResult,
     deliveryResult,
     reminderResult,

@@ -9,6 +9,11 @@ import {
   getDb,
   saveDb,
 } from './db.js';
+import {
+  atomicReserveOperation,
+  atomicCompleteOperation,
+  atomicReleaseReservation,
+} from './idempotencyService.js';
 
 // The 10 Official India Categories (Section 3)
 export const INDIA_CATEGORY_IDS = [
@@ -1001,9 +1006,12 @@ export async function fetchRealSourceArticlesForCategory(
   options: FetchSourceOptions = {}
 ): Promise<RawCollectedArticle[]> {
   const mode = options.mode || getSourceProviderMode();
+  let liveArticles: RawCollectedArticle[] = [];
+  let liveAttempted = false;
 
   // If live or auto mode, attempt real RSS/Atom feed retrieval
   if (mode === 'live' || mode === 'auto') {
+    liveAttempted = true;
     try {
       const liveResult = await retrieveLiveCategoryCandidateArticles(categoryId, {
         referenceDate: options.referenceDate,
@@ -1012,7 +1020,7 @@ export async function fetchRealSourceArticlesForCategory(
       });
 
       if (liveResult.articles.length > 0) {
-        const rawArticles: RawCollectedArticle[] = liveResult.articles.map((art) => ({
+        liveArticles = liveResult.articles.map((art) => ({
           title: art.headline,
           summary: art.summary,
           sourceName: art.sourceName,
@@ -1021,26 +1029,26 @@ export async function fetchRealSourceArticlesForCategory(
           categoryHint: art.categoryId,
           isNegativeDevelopment: art.isNegativeDevelopment,
         }));
-
-        if (mode === 'live' || rawArticles.length >= 10) {
-          return rawArticles;
-        }
-
-        console.log(
-          `[News Source Engine] Live retrieval yielded ${rawArticles.length} articles for ${categoryId}. Augmenting with verified ground pool.`
-        );
       }
     } catch (err: any) {
       console.warn(`[News Source Engine] Live retrieval error for ${categoryId}:`, err.message);
-      if (mode === 'live') {
-        return [];
-      }
     }
   }
 
-  // Deterministic Mock / Grounded Fixture Pool (Section 10 Test Mode)
-  const pool = VERIFIED_SOURCE_DATA[categoryId] || [];
-  return pool.filter((art) =>
+  // If strict 'live' mode was explicitly requested, return only the live articles retrieved
+  if (mode === 'live') {
+    return liveArticles;
+  }
+
+  // If live articles were retrieved in 'auto' mode, use them directly!
+  // Do NOT manufacture or augment with synthetic stories if live news was found (Requirement 4 & 6)
+  if (liveArticles.length > 0) {
+    return liveArticles;
+  }
+
+  // In 'auto' or 'mock' mode when live articles count is 0:
+  // Fall back to verified ground pool (offline fixtures)
+  const groundPool = (VERIFIED_SOURCE_DATA[categoryId] || []).filter((art) =>
     validateStorySource({
       headline: art.title,
       summary: art.summary,
@@ -1048,6 +1056,14 @@ export async function fetchRealSourceArticlesForCategory(
       sourceUrl: art.sourceUrl,
     })
   );
+
+  if (liveAttempted && groundPool.length > 0) {
+    console.log(
+      `[News Source Engine] Live retrieval returned 0 articles for ${categoryId}. Falling back to verified ground pool.`
+    );
+  }
+
+  return groundPool;
 }
 
 export interface NewsGenerationOptions {
@@ -1057,14 +1073,16 @@ export interface NewsGenerationOptions {
   referenceDate?: Date;
   freshnessHours?: number;
   customFetch?: typeof fetch;
+  minRequiredArticles?: number;
+  allowPartialBriefing?: boolean;
 }
 
 /**
  * ============================================================================
  * GEMINI NEWS PROCESSING & CATEGORY PACKAGE FACTORY (Section 2, 4, 5, 9, 10, 11)
  * ============================================================================
- * Generates 10 stories per category per day (100 India stories total).
- * Idempotent: Never regenerates an already-successful news package.
+ * Generates available stories per category per day (up to 10 stories).
+ * Idempotent: Never regenerates an already-successful or partial news package.
  */
 export async function generateCategoryDailyNews(
   categoryId: string,
@@ -1078,9 +1096,12 @@ export async function generateCategoryDailyNews(
     return { success: false, error: `Category '${categoryId}' does not exist.` };
   }
 
-  // Section 11: Idempotency check - do not regenerate if already successful
+  // Section 11: Idempotency check - do not regenerate if already successful or partial
   const existingPkg = db.dailyNewsPackages.find(
-    (p) => p.categoryId === categoryId && p.newsDate === newsDate && p.generationStatus === 'success'
+    (p) =>
+      p.categoryId === categoryId &&
+      p.newsDate === newsDate &&
+      (p.generationStatus === 'success' || p.generationStatus === 'partial')
   );
 
   if (existingPkg) {
@@ -1088,13 +1109,48 @@ export async function generateCategoryDailyNews(
       .filter((s) => s.packageId === existingPkg.packageId)
       .sort((a, b) => a.position - b.position);
 
-    if (existingStories.length === 10) {
+    if (existingStories.length > 0 && existingStories.length === existingPkg.storyCount) {
       return {
         success: true,
         package: existingPkg,
         stories: existingStories,
       };
     }
+  }
+
+  // Atomic check-and-reserve for pkg_<newsDate>_<categoryId>
+  // Prevents two concurrent instances from both generating the same package
+  const packageKey = `pkg_${newsDate}_${categoryId}`;
+  const reservation = await atomicReserveOperation(packageKey, {
+    ttlSeconds: 600, // 10 minutes generation lease
+    metadata: { categoryId, newsDate },
+  });
+
+  if (!reservation.reserved) {
+    if (reservation.reason === 'already_completed') {
+      const completedPkg = db.dailyNewsPackages.find(
+        (p) =>
+          p.categoryId === categoryId &&
+          p.newsDate === newsDate &&
+          (p.generationStatus === 'success' || p.generationStatus === 'partial')
+      );
+      if (completedPkg) {
+        const completedStories = db.newsStories
+          .filter((s) => s.packageId === completedPkg.packageId)
+          .sort((a, b) => a.position - b.position);
+        if (completedStories.length > 0 && completedStories.length === completedPkg.storyCount) {
+          return {
+            success: true,
+            package: completedPkg,
+            stories: completedStories,
+          };
+        }
+      }
+    }
+    return {
+      success: false,
+      error: `Package generation for '${categoryId}' on ${newsDate} is already in progress by another instance.`,
+    };
   }
 
   // Retrieve raw candidate articles through the source retrieval layer (Requirement 2 & Phase 5.1)
@@ -1105,10 +1161,46 @@ export async function generateCategoryDailyNews(
     customFetch: options.customFetch,
   });
 
-  if (candidateArticles.length < 10) {
+  // Check 1: Genuine Zero-News Case (Requirement 7)
+  if (candidateArticles.length === 0) {
+    const errorMsg = `Genuine no-usable-news failure: 0 usable relevant news articles retrieved for category '${category.name}' after all source attempts and retries.`;
+    console.error(`[GENUINE_NO_USABLE_NEWS_FAILURE] ${errorMsg}`);
+    await atomicReleaseReservation(packageKey, errorMsg);
+
+    const packageId = `pkg_zero_${crypto.randomBytes(8).toString('hex')}`;
+    const now = new Date().toISOString();
+    const failedPkg: DailyNewsPackage = {
+      packageId,
+      newsDate,
+      categoryId: category.id,
+      categoryName: category.name,
+      generationStatus: 'failed',
+      storyCount: 0,
+      errorMessage: errorMsg,
+      createdAt: now,
+      updatedAt: now,
+    };
+    db.dailyNewsPackages.push(failedPkg);
+    saveDb();
+
     return {
       success: false,
-      error: `Insufficient verified source articles for category '${category.name}' (found ${candidateArticles.length}, minimum 10 required).`,
+      package: failedPkg,
+      error: errorMsg,
+    };
+  }
+
+  // Minimum verified articles check:
+  // If allowPartialBriefing is true (default in production and resilient mode), any valid candidate count >= 1 is accepted.
+  // In strict legacy 'live' test mode without allowPartialBriefing, minRequired defaults to 10.
+  const allowPartial = options.allowPartialBriefing ?? (options.sourceProviderMode !== 'live');
+  const minRequired = options.minRequiredArticles ?? (allowPartial ? 1 : 10);
+  if (candidateArticles.length < minRequired) {
+    const errorMsg = `Insufficient verified source articles for category '${category.name}' (found ${candidateArticles.length}, minimum ${minRequired} required).`;
+    await atomicReleaseReservation(packageKey, errorMsg);
+    return {
+      success: false,
+      error: errorMsg,
     };
   }
 
@@ -1124,6 +1216,9 @@ export async function generateCategoryDailyNews(
   }> = [];
 
   let lastGenerationError: string | undefined;
+
+  // Target story count: whatever is genuinely available, up to maximum 10 stories (Requirement 4 & 6)
+  const targetCount = Math.min(10, candidateArticles.length);
 
   // Retry loop with exponential backoff (Section 12 & Test N)
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -1148,17 +1243,17 @@ Here are verified candidate articles collected from authoritative Indian news pu
 ${JSON.stringify(candidateArticles, null, 2)}
 
 TASK:
-Produce exactly 10 distinct, non-duplicate news stories for today's briefing following these strict rules:
-1. Stories 1 to 9 MUST be important, constructive, and useful to a business executive reader.
-2. Story #10 MUST be an important negative development ONLY IF ONE GENUINELY EXISTS in the candidates (e.g. major regulatory penalty, corporate failure, fraud, project disruption). If no genuine negative development exists, use a constructive business development. NEVER manufacture a negative story.
-3. Every single story MUST preserve the exact verified sourceName and sourceUrl from the candidates. NEVER hallucinate or alter any URL.
-4. Output a clean JSON array of exactly 10 objects with keys:
-   - position (number 1 to 10)
+Produce exactly ${targetCount} distinct, non-duplicate news stories for today's briefing following these strict rules:
+1. Stories 1 to ${Math.max(1, targetCount - 1)} MUST be important, constructive, and useful to a business executive reader.
+2. Story #${targetCount} MUST be an important negative development ONLY IF ONE GENUINELY EXISTS in the candidates (e.g. major regulatory penalty, corporate failure, fraud, project disruption). If no genuine negative development exists, use a constructive business development. NEVER manufacture a negative story.
+3. Every single story MUST preserve the exact verified sourceName and sourceUrl from the candidates. NEVER hallucinate, invent, or alter any URL.
+4. Output a clean JSON array of exactly ${targetCount} objects with keys:
+   - position (number 1 to ${targetCount})
    - headline (punchy, informative executive headline)
    - summary (2-3 sentences concise factual summary)
    - sourceName (matching source publication name)
    - sourceUrl (exact verified URL from candidates)
-   - sentimentType ("constructive" for 1-9, "negative" or "constructive" for 10)
+   - sentimentType ("constructive" for 1 to ${Math.max(1, targetCount - 1)}, "negative" or "constructive" for ${targetCount})
 
 Respond ONLY with the JSON array.`;
 
@@ -1172,20 +1267,20 @@ Respond ONLY with the JSON array.`;
         });
 
         const timeoutPromise = new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error('Gemini request timeout')), 4000)
+          setTimeout(() => reject(new Error('Gemini request timeout')), 5000)
         );
 
         const response = await Promise.race([apiPromise, timeoutPromise]);
         const responseText = response.text || '';
         const parsed = JSON.parse(responseText);
 
-        if (Array.isArray(parsed) && parsed.length === 10) {
+        if (Array.isArray(parsed) && parsed.length > 0) {
           // Strict URL Provenance Validation: Gemini must NOT have invented any URL (Requirement 3 & 4)
           const allUrlsInCandidates = parsed.every((s) => verifyUrlProvenance(s.sourceUrl, candidateArticles));
           const valid = parsed.every((s) => validateStorySource(s) && typeof s.position === 'number') && allUrlsInCandidates;
           if (valid) {
-            processedStories = parsed.map((s) => ({
-              position: s.position,
+            processedStories = parsed.map((s, idx) => ({
+              position: idx + 1,
               headline: s.headline.trim(),
               summary: s.summary.trim(),
               sourceName: s.sourceName.trim(),
@@ -1206,7 +1301,7 @@ Respond ONLY with the JSON array.`;
     }
   }
 
-  // If simulated 503 exhausted all retries or generation failed completely
+  // If simulated 503 exhausted all retries (specifically for Test N)
   if (simulatedFailuresRemaining > 0 || (options.simulate503Attempts && options.simulate503Attempts >= maxRetries)) {
     const packageId = `pkg_fail_${crypto.randomBytes(8).toString('hex')}`;
     const now = new Date().toISOString();
@@ -1223,6 +1318,7 @@ Respond ONLY with the JSON array.`;
     };
     db.dailyNewsPackages.push(failedPkg);
     saveDb();
+    console.error(`[GENERATION_FAILURE] Category '${category.name}' on ${newsDate}: ${failedPkg.errorMessage}`);
 
     return {
       success: false,
@@ -1231,18 +1327,22 @@ Respond ONLY with the JSON array.`;
     };
   }
 
-  // Fallback / Grounded Source Factory: Construct the 10 stories directly
+  // Fallback / Grounded Source Factory: Construct the stories directly
   // from our retrieved candidate articles according to Section 5
-  if (processedStories.length !== 10) {
+  // Used whenever Gemini is offline, unconfigured, times out, or produces invalid output
+  if (processedStories.length < targetCount) {
     const constructivePool = candidateArticles.filter((a) => !a.isNegativeDevelopment);
     const negativePool = candidateArticles.filter((a) => a.isNegativeDevelopment);
 
     processedStories = [];
-    // Slots 1 to 9: constructive
-    for (let i = 0; i < 9; i++) {
+    const hasNegative = negativePool.length > 0;
+    const numConstructive = hasNegative ? Math.max(0, targetCount - 1) : targetCount;
+
+    for (let i = 0; i < numConstructive; i++) {
       const art = constructivePool[i] || candidateArticles[i];
+      if (!art) break;
       processedStories.push({
-        position: i + 1,
+        position: processedStories.length + 1,
         headline: art.title,
         summary: art.summary,
         sourceName: art.sourceName,
@@ -1251,21 +1351,21 @@ Respond ONLY with the JSON array.`;
       });
     }
 
-    // Slot 10: genuine negative development if exists (Section 5)
-    if (negativePool.length > 0) {
+    // Slot 10 (or last slot): genuine negative development if exists (Section 5)
+    if (hasNegative && processedStories.length < targetCount) {
       const neg = negativePool[0];
       processedStories.push({
-        position: 10,
+        position: processedStories.length + 1,
         headline: neg.title,
         summary: neg.summary,
         sourceName: neg.sourceName,
         sourceUrl: neg.sourceUrl,
         sentimentType: 'negative',
       });
-    } else if (constructivePool[9]) {
-      const art = constructivePool[9];
+    } else if (constructivePool[numConstructive] && processedStories.length < targetCount) {
+      const art = constructivePool[numConstructive];
       processedStories.push({
-        position: 10,
+        position: processedStories.length + 1,
         headline: art.title,
         summary: art.summary,
         sourceName: art.sourceName,
@@ -1275,24 +1375,30 @@ Respond ONLY with the JSON array.`;
     }
   }
 
-  // Validate all 10 stories against domain rules and candidate provenance
+  // Validate all generated stories against domain rules and candidate provenance
   for (const st of processedStories) {
     if (!validateStorySource(st)) {
+      const errorMsg = `Story validation failed at position ${st.position} for source: ${st.sourceUrl}`;
+      await atomicReleaseReservation(packageKey, errorMsg);
+      console.error(`[GENERATION_FAILURE] Category '${category.name}' on ${newsDate}: ${errorMsg}`);
       return {
         success: false,
-        error: `Story validation failed at position ${st.position} for source: ${st.sourceUrl}`,
+        error: errorMsg,
       };
     }
     if (!verifyUrlProvenance(st.sourceUrl, candidateArticles)) {
+      const errorMsg = `Story URL provenance check failed at position ${st.position}: URL was not present in candidate pool.`;
+      await atomicReleaseReservation(packageKey, errorMsg);
+      console.error(`[GENERATION_FAILURE] Category '${category.name}' on ${newsDate}: ${errorMsg}`);
       return {
         success: false,
-        error: `Story URL provenance check failed at position ${st.position}: URL was not present in candidate pool.`,
+        error: errorMsg,
       };
     }
   }
 
   // Atomically persist package and stories in database
-  const packageId = `pkg_${crypto.randomBytes(8).toString('hex')}`;
+  const packageId = packageKey;
   const now = new Date().toISOString();
 
   // Remove any prior incomplete package for this category and date
@@ -1303,12 +1409,25 @@ Respond ONLY with the JSON array.`;
     (s) => !(s.categoryId === categoryId && s.newsDate === newsDate)
   );
 
+  const isFull = processedStories.length >= 10;
+  const generationStatus: DailyNewsPackage['generationStatus'] = isFull ? 'success' : 'partial';
+
+  if (isFull) {
+    console.log(
+      `[FULL_NEWS_SUCCESS] Category '${category.name}' on ${newsDate}: Generated full executive briefing (${processedStories.length} stories).`
+    );
+  } else {
+    console.log(
+      `[PARTIAL_NEWS_SUCCESS] Category '${category.name}' on ${newsDate}: Generated partial executive briefing (${processedStories.length}/10 available stories delivered, 0 fabricated).`
+    );
+  }
+
   const pkgRecord: DailyNewsPackage = {
     packageId,
     newsDate,
     categoryId: category.id,
     categoryName: category.name,
-    generationStatus: 'success',
+    generationStatus,
     storyCount: processedStories.length,
     createdAt: now,
     updatedAt: now,
@@ -1331,6 +1450,8 @@ Respond ONLY with the JSON array.`;
 
   db.newsStories.push(...storyRecords);
   saveDb();
+
+  await atomicCompleteOperation(packageKey, { packageId, storyCount: processedStories.length });
 
   return {
     success: true,

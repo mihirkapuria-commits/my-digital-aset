@@ -9,6 +9,11 @@ import {
   saveDb,
   getCustomerById,
 } from './db.js';
+import {
+  atomicReserveOperation,
+  atomicCompleteOperation,
+  atomicReleaseReservation,
+} from './idempotencyService.js';
 
 // Server-side environment variables (NEVER exposed to frontend)
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
@@ -92,8 +97,9 @@ export function generateTelegramConnectionToken(customerId: string): {
     }
   }
 
-  // Generate 256-bit cryptographically secure token (Section 1: 32 bytes = 256 bits)
-  const token = `mda_${crypto.randomBytes(32).toString('hex')}`;
+  // Generate cryptographically secure token strictly <= 64 chars for Telegram deep-link compliance
+  // 6 char prefix + 48 hex chars (24 bytes = 192 bits of entropy) = 54 chars total <= 64 chars
+  const token = `tgtok_${crypto.randomBytes(24).toString('hex')}`;
   const expiresAt = new Date(now.getTime() + 15 * 60 * 1000).toISOString(); // 15 mins expiry
 
   const connectionTokenRecord: TelegramConnectionToken = {
@@ -542,6 +548,26 @@ export async function sendDay3TrialReminder(
     return { success: true, skipped: true, reason: 'Day-3 reminder already sent previously' };
   }
 
+  const day3Key = `tga_day3_${customerId}`;
+
+  // Atomic check-and-reserve for tga_day3_<customerId>
+  // Prevents concurrent scheduler executions from sending duplicate reminders
+  const reservation = await atomicReserveOperation(day3Key, {
+    metadata: {
+      customerId,
+      eventType: 'DAY3_REMINDER_SENT',
+      telegramChatId: customer.telegramChatId,
+    },
+  });
+
+  if (!reservation.reserved) {
+    return {
+      success: true,
+      skipped: true,
+      reason: 'Day-3 reminder already in progress or sent previously',
+    };
+  }
+
   const reminderText = `🔔 *MyDigitAsset Free Trial Notice*\n\nHello ${customer.fullName},\n\nYour 3-day complimentary trial is completing today. To ensure uninterrupted daily morning briefings delivered to this private chat between 6:00 AM and 7:00 AM IST, please complete your annual subscription.\n\nYour 12-month paid subscription includes an extra 5-day continuous delivery buffer!\n\nOpen your subscriber dashboard at https://www.mydigitasset.com to submit your payment.`;
 
   const sendResult = await sendTelegramMessage(customer.telegramChatId, reminderText, {
@@ -550,6 +576,9 @@ export async function sendDay3TrialReminder(
   });
 
   if (sendResult.success) {
+    await atomicCompleteOperation(day3Key, {
+      telegramMessageId: sendResult.telegramMessageId,
+    });
     recordTelegramAuditEvent({
       customerId: customer.customerId,
       eventType: 'DAY3_REMINDER_SENT' as any,
@@ -560,6 +589,7 @@ export async function sendDay3TrialReminder(
     return { success: true, telegramMessageId: sendResult.telegramMessageId };
   }
 
+  await atomicReleaseReservation(day3Key, sendResult.error);
   recordTelegramAuditEvent({
     customerId: customer.customerId,
     eventType: 'DAY3_REMINDER_FAILED' as any,
