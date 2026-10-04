@@ -247,9 +247,47 @@
         "updatedAt": { "type": "string" }
       },
       "required": ["stateId", "updatedAt"]
+    },
+    "IdempotencyRecord": {
+      "title": "IdempotencyRecord",
+      "description": "Distributed idempotency keys and concurrency reservations",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["RESERVED", "COMPLETED", "FAILED"] },
+        "reservedAt": { "type": "number" },
+        "expiresAt": { "type": "number" },
+        "instanceId": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string" },
+        "failureReason": { "type": "string", "maxLength": 500 }
+      },
+      "required": ["key", "status", "reservedAt", "expiresAt", "instanceId", "updatedAt"]
+    },
+    "SystemCheckpoint": {
+      "title": "SystemCheckpoint",
+      "description": "System operational state and durable synchronization checkpoints",
+      "type": "object",
+      "properties": {
+        "stateId": { "type": "string", "maxLength": 64 },
+        "spreadsheetId": { "type": "string", "maxLength": 128 },
+        "lastSyncStartedAt": { "type": "string" },
+        "lastSyncCompletedAt": { "type": "string" },
+        "lastSyncStatus": { "type": "string", "enum": ["idle", "in_progress", "success", "failed"] },
+        "totalSyncRuns": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["stateId", "updatedAt"]
     }
   },
   "firestore": {
+    "/idempotencyKeys/{key}": {
+      "schema": "IdempotencyRecord",
+      "description": "Distributed idempotency keys and execution reservations"
+    },
+    "/system/{docId}": {
+      "schema": "SystemCheckpoint",
+      "description": "System state and durable synchronization checkpoints"
+    },
     "/customers/{customerId}": {
       "schema": "Customer",
       "description": "Customer profiles and account information"

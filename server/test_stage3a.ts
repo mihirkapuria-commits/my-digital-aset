@@ -63,7 +63,7 @@ export async function runStage3ATests() {
   // --- SUITE 1: ATOMIC CHECK-AND-RESERVE CONCURRENCY RACE ---
   console.log('--- SUITE 1: ATOMIC CHECK-AND-RESERVE CONCURRENCY PROTECTION ---');
 
-  const testKey = `del_${testDate}_cust_race_test_cat_india_startups`;
+  const testKey = `del_${testDate}_${Date.now()}_cust_race_test_cat_india_startups`;
 
   // Simulate two instances attempting to reserve the exact same key concurrently
   const [resA, resB] = await Promise.all([
@@ -103,7 +103,7 @@ export async function runStage3ATests() {
     (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate
   );
   if (!pkg) {
-    await generateDailyAllCategoriesNews(testDate);
+    await generateCategoryDailyNews('cat_india_startups', testDate, { sourceProviderMode: 'mock' });
     pkg = db.dailyNewsPackages.find(
       (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate
     );
@@ -710,7 +710,6 @@ export async function runStage3ATests() {
     categoryIds: ['cat_india_it_tech', 'cat_india_startups'],
     paymentStatus: 'successful',
     paymentDate: '2026-09-29T10:00:00.000Z',
-    amountPaid: 598,
   });
 
   const partialDeliveryRes = await deliverCategoryNewsToCustomer({
@@ -796,7 +795,7 @@ export async function runStage3ATests() {
     zeroGenRes.success === false &&
     zeroGenRes.package?.generationStatus === 'failed' &&
     zeroGenRes.package?.storyCount === 0 &&
-    zeroGenRes.error?.includes('Genuine no-usable-news failure'),
+    Boolean(zeroGenRes.error?.includes('Genuine no-usable-news failure')),
     '46. Requirement F: Genuine zero-news case -> recorded as clear failure state in logs/database',
     `Success: ${zeroGenRes.success}, Status: ${zeroGenRes.package?.generationStatus}, Story count: ${zeroGenRes.package?.storyCount}`
   );

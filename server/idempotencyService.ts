@@ -72,7 +72,7 @@ export async function atomicReserveOperation(
     reservedAt: now,
     expiresAt,
     instanceId,
-    metadata: options?.metadata,
+    metadata: options?.metadata || {},
     updatedAt: new Date().toISOString(),
   };
   localReservations.set(key, tentativeRecord);
@@ -114,7 +114,7 @@ export async function atomicReserveOperation(
         }
       | { reserved: true; rec: IdempotencyRecord };
 
-    const txnResult = await withTimeout<TxnResult>(txnPromise, 2500);
+    const txnResult = await withTimeout<TxnResult>(txnPromise, 5000);
 
     if (!txnResult.reserved) {
       // Revert tentative local reservation and record authoritative remote state
@@ -185,7 +185,7 @@ export async function atomicCompleteOperation(
         },
         { merge: true }
       ),
-      2000
+      5000
     );
   } catch (err: any) {
     console.warn(`[Idempotency Notice] Complete update note for ${key}:`, err?.message || err);
@@ -212,7 +212,7 @@ export async function atomicReleaseReservation(key: string, reason?: string): Pr
         },
         { merge: true }
       ),
-      2000
+      5000
     );
   } catch (err: any) {
     console.warn(`[Idempotency Notice] Release update note for ${key}:`, err?.message || err);

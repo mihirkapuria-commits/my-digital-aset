@@ -640,26 +640,36 @@ export async function retrieveLiveCategoryCandidateArticles(
   const sourceStats: Array<{ feedId: string; name: string; success: boolean; count: number; error?: string }> = [];
 
   for (const feed of categoryFeeds) {
-    const res = await fetchSingleRssFeed(feed, options);
-    sourceStats.push({
-      feedId: feed.id,
-      name: feed.name,
-      success: res.success,
-      count: res.articles.length,
-      error: res.error,
-    });
+    try {
+      const res = await fetchSingleRssFeed(feed, options);
+      sourceStats.push({
+        feedId: feed.id,
+        name: feed.name,
+        success: res.success,
+        count: res.articles.length,
+        error: res.error,
+      });
 
-    if (res.success && res.articles.length > 0) {
-      for (const art of res.articles) {
-        const canonicalUrl = normalizeArticleUrl(art.sourceUrl);
-        const headlineNorm = art.headline.toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (res.success && res.articles.length > 0) {
+        for (const art of res.articles) {
+          const canonicalUrl = normalizeArticleUrl(art.sourceUrl);
+          const headlineNorm = art.headline.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        // Within-category deduplication (Requirement 6)
-        if (!articlesByUrl.has(canonicalUrl) && !seenHeadlines.has(headlineNorm)) {
-          articlesByUrl.set(canonicalUrl, art);
-          seenHeadlines.add(headlineNorm);
+          // Within-category deduplication (Requirement 6)
+          if (!articlesByUrl.has(canonicalUrl) && !seenHeadlines.has(headlineNorm)) {
+            articlesByUrl.set(canonicalUrl, art);
+            seenHeadlines.add(headlineNorm);
+          }
         }
       }
+    } catch (feedErr: any) {
+      sourceStats.push({
+        feedId: feed.id,
+        name: feed.name,
+        success: false,
+        count: 0,
+        error: feedErr?.message || 'Source retrieval exception',
+      });
     }
   }
 

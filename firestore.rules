@@ -76,6 +76,16 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
 
+    // 16. Idempotency Keys (Distributed check-and-reserve locks)
+    match /idempotencyKeys/{key} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 17. System Checkpoints (Google Sheet Sync state & lease locks)
+    match /system/{docId} {
+      allow read, create, update, delete: if true;
+    }
+
     // Default-deny catch-all
     match /{document=**} {
       allow read, write: if false;

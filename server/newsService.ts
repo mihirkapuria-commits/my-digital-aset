@@ -1191,10 +1191,9 @@ export async function generateCategoryDailyNews(
   }
 
   // Minimum verified articles check:
-  // If allowPartialBriefing is true (default in production and resilient mode), any valid candidate count >= 1 is accepted.
-  // In strict legacy 'live' test mode without allowPartialBriefing, minRequired defaults to 10.
-  const allowPartial = options.allowPartialBriefing ?? (options.sourceProviderMode !== 'live');
-  const minRequired = options.minRequiredArticles ?? (allowPartial ? 1 : 10);
+  // If partial valid news is available, deliver it; do NOT require the full target count.
+  // Defaults to 1 (accept partial news) unless caller explicitly requested a strict higher minimum.
+  const minRequired = options.minRequiredArticles ?? 1;
   if (candidateArticles.length < minRequired) {
     const errorMsg = `Insufficient verified source articles for category '${category.name}' (found ${candidateArticles.length}, minimum ${minRequired} required).`;
     await atomicReleaseReservation(packageKey, errorMsg);
