@@ -41,6 +41,11 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
 
+    // 8b. India Telegram Delivery Logs (System B)
+    match /indiaTelegramDeliveryLogs/{logId} {
+      allow read, create, update, delete: if true;
+    }
+
     // 9. Daily News Packages
     match /dailyNewsPackages/{packageId} {
       allow read, create, update, delete: if true;
@@ -56,8 +61,18 @@ service cloud.firestore {
       allow read, create, update, delete: if true;
     }
 
+    // 11b. India Telegram Connection Tokens (System B)
+    match /indiaTelegramConnectionTokens/{token} {
+      allow read, create, update, delete: if true;
+    }
+
     // 12. Telegram Connection Audits
     match /telegramConnectionAudits/{auditId} {
+      allow read, create, update, delete: if true;
+    }
+
+    // 12b. India Telegram Connection Audits (System B)
+    match /indiaTelegramConnectionAudits/{auditId} {
       allow read, create, update, delete: if true;
     }
 

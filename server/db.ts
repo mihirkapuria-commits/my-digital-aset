@@ -360,10 +360,13 @@ export async function syncDbToFirestore(db: MyDigitAssetDatabase): Promise<void>
     ),
     syncCollectionBatch('categoryTransferAudits', db.categoryTransferAudits, (a) => a.transferId),
     syncCollectionBatch('telegramDeliveryLogs', db.telegramDeliveryLogs, (l) => l.deliveryId),
+    syncCollectionBatch('indiaTelegramDeliveryLogs', db.indiaTelegramDeliveryLogs, (l) => l.deliveryId),
     syncCollectionBatch('dailyNewsPackages', db.dailyNewsPackages, (p) => p.packageId),
     syncCollectionBatch('newsStories', db.newsStories, (s) => s.storyId),
     syncCollectionBatch('telegramConnectionTokens', db.telegramConnectionTokens, (t) => t.token),
+    syncCollectionBatch('indiaTelegramConnectionTokens', db.indiaTelegramConnectionTokens, (t) => t.token),
     syncCollectionBatch('telegramConnectionAudits', db.telegramConnectionAudits, (a) => a.eventId),
+    syncCollectionBatch('indiaTelegramConnectionAudits', db.indiaTelegramConnectionAudits, (a) => a.eventId),
     syncCollectionBatch('categories', db.categories, (c) => c.id),
   ]);
 }

@@ -322,6 +322,10 @@
       "schema": "TelegramDeliveryLog",
       "description": "Telegram news delivery logs"
     },
+    "/indiaTelegramDeliveryLogs/{deliveryId}": {
+      "schema": "TelegramDeliveryLog",
+      "description": "System B India Telegram news delivery logs"
+    },
     "/dailyNewsPackages/{packageId}": {
       "schema": "DailyNewsPackage",
       "description": "Daily news packages per category"
@@ -334,9 +338,17 @@
       "schema": "TelegramConnectionToken",
       "description": "Deep-link tokens for Telegram binding"
     },
+    "/indiaTelegramConnectionTokens/{token}": {
+      "schema": "TelegramConnectionToken",
+      "description": "System B India deep-link tokens for Telegram binding"
+    },
     "/telegramConnectionAudits/{eventId}": {
       "schema": "TelegramConnectionAuditEvent",
       "description": "Telegram audit logs"
+    },
+    "/indiaTelegramConnectionAudits/{eventId}": {
+      "schema": "TelegramConnectionAuditEvent",
+      "description": "System B India Telegram audit logs"
     },
     "/categories/{categoryId}": {
       "schema": "Category",
