@@ -14,6 +14,13 @@ import {
   atomicCompleteOperation,
   atomicReleaseReservation,
 } from './idempotencyService.js';
+import {
+  getHistoricalDeliveredStories,
+  filterEligibleCandidateArticles,
+  isSameUnderlyingEvent,
+  type CandidateDeduplicationSummary,
+  type DeduplicationMatchResult,
+} from './deduplicationService.js';
 
 // The 10 Official India Categories (Section 3)
 export const INDIA_CATEGORY_IDS = [
@@ -1075,6 +1082,10 @@ export interface NewsGenerationOptions {
   customFetch?: typeof fetch;
   minRequiredArticles?: number;
   allowPartialBriefing?: boolean;
+  candidatePool?: RawCollectedArticle[];
+  bypass7DayDeduplication?: boolean;
+  customHistoricalStories?: NewsStory[];
+  allowPartialRecovery?: boolean;
 }
 
 /**
@@ -1096,7 +1107,15 @@ export async function generateCategoryDailyNews(
     return { success: false, error: `Category '${categoryId}' does not exist.` };
   }
 
-  // Section 11: Idempotency check - do not regenerate if already successful or partial
+  // Admin Enable/Disable Check: A disabled category must not generate news or create new news packages
+  if (!category.isActive) {
+    return {
+      success: false,
+      error: `Category '${category.name}' (${categoryId}) is currently disabled in the admin catalog. News generation is suspended.`,
+    };
+  }
+
+  // Section 11: Idempotency check - do not regenerate if already full success or sealed/unrequested partial
   const existingPkg = db.dailyNewsPackages.find(
     (p) =>
       p.categoryId === categoryId &&
@@ -1109,18 +1128,38 @@ export async function generateCategoryDailyNews(
       .filter((s) => s.packageId === existingPkg.packageId)
       .sort((a, b) => a.position - b.position);
 
-    if (existingStories.length > 0 && existingStories.length === existingPkg.storyCount) {
-      return {
-        success: true,
-        package: existingPkg,
-        stories: existingStories,
-      };
+    // Full successful package (>=10 stories): permanently idempotent, never regenerate (Part 2 Case A)
+    if (existingPkg.generationStatus === 'success' && existingPkg.storyCount >= 10) {
+      if (existingStories.length > 0 && existingStories.length === existingPkg.storyCount) {
+        return {
+          success: true,
+          package: existingPkg,
+          stories: existingStories,
+        };
+      }
+    }
+
+    // Partial package: if sealed or recovery not explicitly requested, return existing package
+    if (existingPkg.generationStatus === 'partial' && (!options.allowPartialRecovery || existingPkg.isSealed)) {
+      if (existingStories.length > 0 && existingStories.length === existingPkg.storyCount) {
+        return {
+          success: true,
+          package: existingPkg,
+          stories: existingStories,
+        };
+      }
     }
   }
 
   // Atomic check-and-reserve for pkg_<newsDate>_<categoryId>
   // Prevents two concurrent instances from both generating the same package
   const packageKey = `pkg_${newsDate}_${categoryId}`;
+
+  if (options.allowPartialRecovery && existingPkg && existingPkg.generationStatus === 'partial') {
+    // Release previous completion lock to allow controlled recovery attempt
+    await atomicReleaseReservation(packageKey, 'Controlled recovery attempt for partial package');
+  }
+
   const reservation = await atomicReserveOperation(packageKey, {
     ttlSeconds: 600, // 10 minutes generation lease
     metadata: { categoryId, newsDate },
@@ -1145,27 +1184,58 @@ export async function generateCategoryDailyNews(
             stories: completedStories,
           };
         }
+      } else {
+        // Orphaned reservation: idempotencyKey marked COMPLETED but package record does not exist in DB
+        await atomicReleaseReservation(packageKey, 'Orphaned reservation missing package record');
+        const retryRes = await atomicReserveOperation(packageKey, {
+          ttlSeconds: 600,
+          metadata: { categoryId, newsDate },
+        });
+        if (!retryRes.reserved) {
+          return {
+            success: false,
+            error: `Package generation for '${categoryId}' on ${newsDate} is already in progress by another instance.`,
+          };
+        }
       }
+    } else {
+      return {
+        success: false,
+        error: `Package generation for '${categoryId}' on ${newsDate} is already in progress by another instance.`,
+      };
     }
-    return {
-      success: false,
-      error: `Package generation for '${categoryId}' on ${newsDate} is already in progress by another instance.`,
-    };
   }
 
-  // Retrieve raw candidate articles through the source retrieval layer (Requirement 2 & Phase 5.1)
-  const candidateArticles = await fetchRealSourceArticlesForCategory(categoryId, {
-    mode: options.sourceProviderMode,
-    referenceDate: options.referenceDate,
-    freshnessHours: options.freshnessHours,
-    customFetch: options.customFetch,
-  });
+  // Retrieve raw candidate articles through the source retrieval layer or direct candidate pool
+  const rawCandidateArticles = options.candidatePool
+    ? options.candidatePool.filter((art) =>
+        validateStorySource({
+          headline: art.title,
+          summary: art.summary,
+          sourceName: art.sourceName,
+          sourceUrl: art.sourceUrl,
+        })
+      )
+    : await fetchRealSourceArticlesForCategory(categoryId, {
+        mode: options.sourceProviderMode,
+        referenceDate: options.referenceDate,
+        freshnessHours: options.freshnessHours,
+        customFetch: options.customFetch,
+      });
 
-  // Check 1: Genuine Zero-News Case (Requirement 7)
-  if (candidateArticles.length === 0) {
+  // Check 1: Genuine Zero-News Case on raw candidates (Requirement 7)
+  if (rawCandidateArticles.length === 0) {
     const errorMsg = `Genuine no-usable-news failure: 0 usable relevant news articles retrieved for category '${category.name}' after all source attempts and retries.`;
     console.error(`[GENUINE_NO_USABLE_NEWS_FAILURE] ${errorMsg}`);
     await atomicReleaseReservation(packageKey, errorMsg);
+
+    const prevFailed = db.dailyNewsPackages.find(
+      (p) => p.categoryId === category.id && p.newsDate === newsDate
+    );
+    const failedAttempts = ((prevFailed as any)?.failedAttempts || 0) + 1;
+    db.dailyNewsPackages = db.dailyNewsPackages.filter(
+      (p) => !(p.categoryId === category.id && p.newsDate === newsDate)
+    );
 
     const packageId = `pkg_zero_${crypto.randomBytes(8).toString('hex')}`;
     const now = new Date().toISOString();
@@ -1177,7 +1247,8 @@ export async function generateCategoryDailyNews(
       generationStatus: 'failed',
       storyCount: 0,
       errorMessage: errorMsg,
-      createdAt: now,
+      failedAttempts,
+      createdAt: prevFailed?.createdAt || now,
       updatedAt: now,
     };
     db.dailyNewsPackages.push(failedPkg);
@@ -1188,6 +1259,84 @@ export async function generateCategoryDailyNews(
       package: failedPkg,
       error: errorMsg,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // STEP 2: 7-DAY NEWS DEDUPLICATION & INTRA-DAY DEDUPLICATION
+  // --------------------------------------------------------------------------
+  // Retrieve delivered stories for this category during the previous 7 days
+  const historicalStories = options.customHistoricalStories || (
+    options.bypass7DayDeduplication
+      ? []
+      : getHistoricalDeliveredStories(categoryId, newsDate, 7)
+  );
+
+  // Filter raw candidates: drops 7-day historical duplicates and intra-day duplicates
+  const dedupSummary = filterEligibleCandidateArticles(rawCandidateArticles, historicalStories);
+  const candidateArticles = dedupSummary.eligible;
+
+  if (dedupSummary.duplicatesRemoved > 0) {
+    console.log(
+      `[7-DAY_DEDUP] Category '${category.name}' on ${newsDate}: Removed ${dedupSummary.duplicatesRemoved} duplicate candidate(s). ${candidateArticles.length} genuinely new eligible stories remain.`
+    );
+  }
+
+  // Check 1B: Zero eligible stories remaining after applying 7-day deduplication
+  if (candidateArticles.length === 0) {
+    const errorMsg = `Genuine no-usable-news failure: 0 usable relevant news articles retrieved for category '${category.name}' after all source attempts and 7-day deduplication.`;
+    console.error(`[GENUINE_NO_USABLE_NEWS_FAILURE] ${errorMsg}`);
+    await atomicReleaseReservation(packageKey, errorMsg);
+
+    const prevFailed = db.dailyNewsPackages.find(
+      (p) => p.categoryId === category.id && p.newsDate === newsDate
+    );
+    const failedAttempts = ((prevFailed as any)?.failedAttempts || 0) + 1;
+    db.dailyNewsPackages = db.dailyNewsPackages.filter(
+      (p) => !(p.categoryId === category.id && p.newsDate === newsDate)
+    );
+
+    const packageId = `pkg_zero_${crypto.randomBytes(8).toString('hex')}`;
+    const now = new Date().toISOString();
+    const failedPkg: DailyNewsPackage = {
+      packageId,
+      newsDate,
+      categoryId: category.id,
+      categoryName: category.name,
+      generationStatus: 'failed',
+      storyCount: 0,
+      dedupCount: dedupSummary.duplicatesRemoved,
+      errorMessage: errorMsg,
+      failedAttempts,
+      createdAt: prevFailed?.createdAt || now,
+      updatedAt: now,
+    };
+    db.dailyNewsPackages.push(failedPkg);
+    saveDb();
+
+    return {
+      success: false,
+      package: failedPkg,
+      error: errorMsg,
+    };
+  }
+
+  // Controlled partial recovery: if candidate count does not exceed current story count, do not downgrade
+  if (options.allowPartialRecovery && existingPkg && existingPkg.generationStatus === 'partial') {
+    if (candidateArticles.length <= (existingPkg.storyCount || 0)) {
+      existingPkg.recoveryAttempts = (existingPkg.recoveryAttempts || 0) + 1;
+      existingPkg.lastRecoveredAt = new Date().toISOString();
+      existingPkg.updatedAt = new Date().toISOString();
+      saveDb();
+      await atomicCompleteOperation(packageKey, { packageId: existingPkg.packageId, storyCount: existingPkg.storyCount });
+      const currentStories = db.newsStories
+        .filter((s) => s.packageId === existingPkg.packageId)
+        .sort((a, b) => a.position - b.position);
+      return {
+        success: true,
+        package: existingPkg,
+        stories: currentStories,
+      };
+    }
   }
 
   // Minimum verified articles check:
@@ -1401,6 +1550,9 @@ Respond ONLY with the JSON array.`;
   const now = new Date().toISOString();
 
   // Remove any prior incomplete package for this category and date
+  const priorPkg = db.dailyNewsPackages.find(
+    (p) => p.categoryId === categoryId && p.newsDate === newsDate
+  );
   db.dailyNewsPackages = db.dailyNewsPackages.filter(
     (p) => !(p.categoryId === categoryId && p.newsDate === newsDate)
   );
@@ -1421,6 +1573,7 @@ Respond ONLY with the JSON array.`;
     );
   }
 
+  const recoveryAttempts = ((priorPkg as any)?.recoveryAttempts || 0) + (options.allowPartialRecovery ? 1 : 0);
   const pkgRecord: DailyNewsPackage = {
     packageId,
     newsDate,
@@ -1428,7 +1581,10 @@ Respond ONLY with the JSON array.`;
     categoryName: category.name,
     generationStatus,
     storyCount: processedStories.length,
-    createdAt: now,
+    dedupCount: dedupSummary.duplicatesRemoved,
+    recoveryAttempts,
+    lastRecoveredAt: options.allowPartialRecovery ? now : (priorPkg as any)?.lastRecoveredAt,
+    createdAt: priorPkg?.createdAt || now,
     updatedAt: now,
   };
   db.dailyNewsPackages.push(pkgRecord);
@@ -1444,6 +1600,7 @@ Respond ONLY with the JSON array.`;
     sourceName: s.sourceName,
     sourceUrl: s.sourceUrl,
     sentimentType: s.sentimentType,
+    dedupFingerprint: `${category.id}_${s.position}`,
     createdAt: now,
   }));
 
@@ -1555,3 +1712,10 @@ export function formatCategoryNewsTelegramMessage(
   message += `🔒 _Delivered privately to your account by MyDigitAsset. Reply /help for assistance._`;
   return message.trim();
 }
+
+export {
+  getHistoricalDeliveredStories,
+  filterEligibleCandidateArticles,
+  isSameUnderlyingEvent,
+};
+export type { CandidateDeduplicationSummary, DeduplicationMatchResult };

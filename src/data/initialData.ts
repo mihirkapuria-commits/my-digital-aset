@@ -52,7 +52,82 @@ export const futureProducts: Product[] = [
   },
 ];
 
-export const initialCategories: Category[] = [
+// SYSTEM A: 7 Working Specialist News Categories (Preserved Stream)
+export const specialistCategories: Category[] = [
+  {
+    id: 'cat_japan_re',
+    productId: 'prod_news_daily',
+    name: 'Japan Real Estate',
+    slug: 'japan-real-estate',
+    description: 'Tokyo residential yields, cross-border yen debt financing, and Japanese commercial real estate.',
+    isActive: true,
+    displayOrder: 1,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_healthcare',
+    productId: 'prod_news_daily',
+    name: 'India Healthcare',
+    slug: 'india-healthcare',
+    description: 'Tier-2 hospital chains, pharma M&A, biosimilars, and medical device manufacturing in India.',
+    isActive: true,
+    displayOrder: 2,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_pe_vc',
+    productId: 'prod_news_daily',
+    name: 'India PE / VC',
+    slug: 'india-pe-vc',
+    description: 'Institutional private equity, venture buyout transactions, LP commitments, and secondary exits in India.',
+    isActive: true,
+    displayOrder: 3,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_coffee_nespresso',
+    productId: 'prod_news_daily',
+    name: 'India Coffee & Nespresso',
+    slug: 'india-coffee-nespresso',
+    description: 'Single-origin estates, commercial coffee trade, premium pod formats, and specialty cafe market intelligence.',
+    isActive: true,
+    displayOrder: 4,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_oil_gas',
+    productId: 'prod_news_daily',
+    name: 'India Oil & Gas',
+    slug: 'india-oil-gas',
+    description: 'Upstream exploration, LNG import terminals, refining margins, and domestic pipeline distribution infrastructure.',
+    isActive: true,
+    displayOrder: 5,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_wedding_cards',
+    productId: 'prod_news_daily',
+    name: 'India Wedding Cards',
+    slug: 'india-wedding-cards',
+    description: 'Bespoke wedding stationery, luxury invitation design ateliers, digital invite platforms, and ceremonial print market trends.',
+    isActive: true,
+    displayOrder: 6,
+    system: 'specialist',
+  },
+  {
+    id: 'cat_india_gems_jewellery',
+    productId: 'prod_news_daily',
+    name: 'India Gems & Jewellery',
+    slug: 'india-gems-jewellery',
+    description: 'Diamond polishing hubs, retail bullion trade, hallmarking norms, lab-grown gems, and luxury jewellery exports.',
+    isActive: true,
+    displayOrder: 7,
+    system: 'specialist',
+  },
+];
+
+// SYSTEM B: 10 New India News Categories (Distinct Product Stream)
+export const indiaCategories: Category[] = [
   {
     id: 'cat_india_startups',
     productId: 'prod_news_daily',
@@ -61,6 +136,7 @@ export const initialCategories: Category[] = [
     description: 'Venture funding, early-stage rounds, unicorn milestones, and startup ecosystem developments in India.',
     isActive: true,
     displayOrder: 1,
+    system: 'india',
   },
   {
     id: 'cat_india_banking_fintech',
@@ -70,6 +146,7 @@ export const initialCategories: Category[] = [
     description: 'RBI policies, digital payments, lending tech, banking capital, and regulatory updates in India.',
     isActive: true,
     displayOrder: 2,
+    system: 'india',
   },
   {
     id: 'cat_india_re_infra',
@@ -79,15 +156,17 @@ export const initialCategories: Category[] = [
     description: 'Commercial real estate, highways, logistics parks, REITs, and urban infrastructure developments.',
     isActive: true,
     displayOrder: 3,
+    system: 'india',
   },
   {
     id: 'cat_india_it_tech',
     productId: 'prod_news_daily',
-    name: 'India Information Technology (IT), AI, Cybersecurity & General Technology',
+    name: 'India IT, AI, Cybersecurity & Technology',
     slug: 'india-it-tech-ai',
     description: 'Enterprise IT services, artificial intelligence, cloud architectures, cybersecurity, and deep tech.',
     isActive: true,
     displayOrder: 4,
+    system: 'india',
   },
   {
     id: 'cat_india_consumer_fmcg',
@@ -97,6 +176,7 @@ export const initialCategories: Category[] = [
     description: 'Direct-to-consumer brands, packaged goods, quick commerce, retail expansion, and consumer demand.',
     isActive: true,
     displayOrder: 5,
+    system: 'india',
   },
   {
     id: 'cat_india_mfg_auto',
@@ -106,6 +186,7 @@ export const initialCategories: Category[] = [
     description: 'PLI schemes, heavy engineering, automotive, EV transition, and domestic supply chains.',
     isActive: true,
     displayOrder: 6,
+    system: 'india',
   },
   {
     id: 'cat_india_energy_renewables',
@@ -115,6 +196,7 @@ export const initialCategories: Category[] = [
     description: 'Solar farms, wind corridors, green hydrogen, battery storage, and national grid capacity.',
     isActive: true,
     displayOrder: 7,
+    system: 'india',
   },
   {
     id: 'cat_india_economy_business',
@@ -124,6 +206,7 @@ export const initialCategories: Category[] = [
     description: 'Macroeconomics, GST revenues, trade balances, industrial output, and national fiscal data.',
     isActive: true,
     displayOrder: 8,
+    system: 'india',
   },
   {
     id: 'cat_india_hr_employment',
@@ -133,6 +216,7 @@ export const initialCategories: Category[] = [
     description: 'Talent hiring trends, executive compensation, workforce automation, and campus placement cycles.',
     isActive: true,
     displayOrder: 9,
+    system: 'india',
   },
   {
     id: 'cat_india_marketing_ads',
@@ -142,16 +226,13 @@ export const initialCategories: Category[] = [
     description: 'Digital ad-spends, agency wins, branding campaigns, influencer commerce, and media shifts.',
     isActive: true,
     displayOrder: 10,
+    system: 'india',
   },
-  {
-    id: 'cat_japan_re',
-    productId: 'prod_news_daily',
-    name: 'Japan Real Estate',
-    slug: 'japan-real-estate',
-    description: 'Tokyo residential yields, cross-border yen debt financing, and Japanese commercial real estate.',
-    isActive: true,
-    displayOrder: 11,
-  },
+];
+
+export const initialCategories: Category[] = [
+  ...specialistCategories,
+  ...indiaCategories,
 ];
 
 export const initialNewsArticles: NewsArticle[] = [

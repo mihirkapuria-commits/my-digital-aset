@@ -160,6 +160,38 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
   const [isTestingUpload, setIsTestingUpload] =
     useState(false);
 
+  // Category status toggle state
+  const [updatingCategoryId, setUpdatingCategoryId] = useState<string | null>(null);
+  const [categoryMessage, setCategoryMessage] = useState<string | null>(null);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+
+  const handleToggleCategoryStatus = async (categoryId: string, currentStatus: boolean) => {
+    setUpdatingCategoryId(categoryId);
+    try {
+      const res = await fetch('/api/admin/category-status', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ categoryId, isActive: !currentStatus }),
+      });
+      const data = await res.json();
+      if (data.ok && data.category) {
+        onUpdateCategories(
+          categories.map((c) => (c.id === categoryId ? { ...c, isActive: !currentStatus } : c))
+        );
+        setCategoryMessage(`Category '${data.category.name}' status updated to ${!currentStatus ? 'Enabled' : 'Disabled'}.`);
+        setTimeout(() => setCategoryMessage(null), 4000);
+      } else {
+        setCategoryError(data.error || 'Failed to update category status.');
+        setTimeout(() => setCategoryError(null), 4000);
+      }
+    } catch (err: any) {
+      setCategoryError(err.message || 'Error updating category.');
+      setTimeout(() => setCategoryError(null), 4000);
+    } finally {
+      setUpdatingCategoryId(null);
+    }
+  };
+
   // ============================================================
   // AUTHENTICATION CHECK
   // ============================================================
@@ -1200,41 +1232,178 @@ export const AdminPortal: React.FC<AdminPortalProps> = ({
         {/* CATEGORIES */}
 
         {activeTab === 'categories' && (
-          <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-4">
+          <div className="space-y-6">
 
-            <h2 className="text-base font-bold text-stone-900">
-              Active News Verticals
-            </h2>
+            {categoryMessage && (
+              <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs px-4 py-3 rounded-xl flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{categoryMessage}</span>
+              </div>
+            )}
 
-            <div className="divide-y divide-stone-100 text-xs">
+            {categoryError && (
+              <div className="bg-rose-50 border border-rose-200 text-rose-800 text-xs px-4 py-3 rounded-xl flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{categoryError}</span>
+              </div>
+            )}
 
-              {categories.map((c) => (
-
-                <div
-                  key={c.id}
-                  className="py-3 flex items-center justify-between"
-                >
-
-                  <div>
-
-                    <span className="font-semibold text-stone-900">
-                      {c.name}
+            {/* SECTION 1: SYSTEM B — NEW INDIA NEWS CATEGORIES */}
+            <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-stone-900">
+                      India News Categories
+                    </h2>
+                    <span className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-semibold">
+                      System B • 10 Categories
                     </span>
-
-                    <p className="text-stone-500 text-[11px]">
-                      {c.description}
-                    </p>
-
                   </div>
-
-                  <span className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded font-mono">
-                    ID: {c.id}
-                  </span>
-
+                  <p className="text-stone-500 text-xs mt-0.5">
+                    Independent Enable/Disable controls for the 10 India categories. Disabling a category halts news generation and Telegram delivery for that category only.
+                  </p>
                 </div>
+                <div className="text-xs text-stone-500">
+                  <span className="font-semibold text-stone-800">
+                    {categories.filter((c) => (c.system === 'india' || c.id.startsWith('cat_india_')) && c.id !== 'cat_india_healthcare' && c.id !== 'cat_india_pe_vc' && c.id !== 'cat_india_coffee_nespresso' && c.id !== 'cat_india_oil_gas' && c.id !== 'cat_india_wedding_cards' && c.id !== 'cat_india_gems_jewellery' && c.isActive).length} / 10
+                  </span> Active
+                </div>
+              </div>
 
-              ))}
+              <div className="divide-y divide-stone-100 text-xs">
+                {categories
+                  .filter((c) => (c.system === 'india' || c.id.startsWith('cat_india_')) && c.id !== 'cat_india_healthcare' && c.id !== 'cat_india_pe_vc' && c.id !== 'cat_india_coffee_nespresso' && c.id !== 'cat_india_oil_gas' && c.id !== 'cat_india_wedding_cards' && c.id !== 'cat_india_gems_jewellery')
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      className="py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-stone-900">
+                            {c.name}
+                          </span>
+                          <span className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded font-mono">
+                            {c.id}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                              c.isActive
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-stone-100 text-stone-500 border border-stone-200'
+                            }`}
+                          >
+                            {c.isActive ? 'Active' : 'Disabled'}
+                          </span>
+                        </div>
+                        <p className="text-stone-500 text-[11px]">
+                          {c.description}
+                        </p>
+                      </div>
 
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={updatingCategoryId === c.id}
+                          onClick={() => handleToggleCategoryStatus(c.id, c.isActive)}
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition cursor-pointer flex items-center gap-1.5 ${
+                            c.isActive
+                              ? 'bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100'
+                              : 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                          } ${updatingCategoryId === c.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {updatingCategoryId === c.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : c.isActive ? (
+                            <span>Disable Category</span>
+                          ) : (
+                            <span>Enable Category</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            </div>
+
+            {/* SECTION 2: SYSTEM A — EXISTING SPECIALIST NEWS CATEGORIES */}
+            <div className="bg-white border border-stone-200 rounded-2xl p-5 sm:p-6 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-stone-100 pb-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-stone-900">
+                      Specialist News Categories
+                    </h2>
+                    <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">
+                      System A • 7 Working Specialist Categories
+                    </span>
+                  </div>
+                  <p className="text-stone-500 text-xs mt-0.5">
+                    Existing working product stream. Uses dedicated specialist Telegram bot and delivery pipeline.
+                  </p>
+                </div>
+                <div className="text-xs text-stone-500">
+                  <span className="font-semibold text-stone-800">
+                    {categories.filter((c) => c.system === 'specialist' || c.id === 'cat_japan_re' || c.id === 'cat_india_healthcare' || c.id === 'cat_india_pe_vc' || c.id === 'cat_india_coffee_nespresso' || c.id === 'cat_india_oil_gas' || c.id === 'cat_india_wedding_cards' || c.id === 'cat_india_gems_jewellery').filter((c) => c.isActive).length} / 7
+                  </span> Active
+                </div>
+              </div>
+
+              <div className="divide-y divide-stone-100 text-xs">
+                {categories
+                  .filter((c) => c.system === 'specialist' || c.id === 'cat_japan_re' || c.id === 'cat_india_healthcare' || c.id === 'cat_india_pe_vc' || c.id === 'cat_india_coffee_nespresso' || c.id === 'cat_india_oil_gas' || c.id === 'cat_india_wedding_cards' || c.id === 'cat_india_gems_jewellery')
+                  .map((c) => (
+                    <div
+                      key={c.id}
+                      className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                    >
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-stone-900">
+                            {c.name}
+                          </span>
+                          <span className="text-[10px] bg-stone-100 text-stone-600 px-2 py-0.5 rounded font-mono">
+                            {c.id}
+                          </span>
+                          <span
+                            className={`text-[10px] px-2 py-0.5 rounded-full font-semibold ${
+                              c.isActive
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : 'bg-stone-100 text-stone-500 border border-stone-200'
+                            }`}
+                          >
+                            {c.isActive ? 'Active' : 'Disabled'}
+                          </span>
+                        </div>
+                        <p className="text-stone-500 text-[11px]">
+                          {c.description}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          disabled={updatingCategoryId === c.id}
+                          onClick={() => handleToggleCategoryStatus(c.id, c.isActive)}
+                          className={`px-3 py-1.5 rounded-lg font-medium text-xs transition cursor-pointer flex items-center gap-1.5 ${
+                            c.isActive
+                              ? 'bg-stone-100 text-stone-700 border border-stone-200 hover:bg-stone-200'
+                              : 'bg-stone-900 text-white hover:bg-stone-800'
+                          } ${updatingCategoryId === c.id ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          {updatingCategoryId === c.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          ) : c.isActive ? (
+                            <span>Deactivate</span>
+                          ) : (
+                            <span>Activate</span>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+              </div>
             </div>
 
           </div>

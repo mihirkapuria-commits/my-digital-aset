@@ -23,6 +23,8 @@ export interface Product {
   billingPeriod: 'yearly' | 'monthly' | 'quarterly' | 'one_time';
 }
 
+export type NewsSystemType = 'specialist' | 'india';
+
 export interface Category {
   id: string;
   productId: string; // Links category to a specific product (e.g. news)
@@ -31,6 +33,7 @@ export interface Category {
   description?: string;
   isActive: boolean;
   displayOrder: number;
+  system?: NewsSystemType; // 'specialist' (System A) or 'india' (System B)
 }
 
 export interface NewsArticle {
@@ -66,6 +69,9 @@ export interface Customer {
   customerAuthToken?: string; // Opaque 256-bit session/auth token for endpoint protection
   telegramChatId?: string | null;
   telegramConnected: boolean;
+  // System B (India News) Telegram Connection
+  indiaTelegramChatId?: string | null;
+  indiaTelegramConnected?: boolean;
   accountStatus: 'active' | 'inactive' | 'suspended';
   trialStartDate?: string;
   trialEndDate?: string;
@@ -192,6 +198,8 @@ export interface TelegramDeliveryLog {
   telegramMessageId?: string | null;
   error?: string | null;
   timestamp: string;
+  system?: NewsSystemType;
+  botType?: NewsSystemType;
 }
 
 /**
@@ -204,9 +212,15 @@ export interface DailyNewsPackage {
   categoryName: string;
   generationStatus: 'pending' | 'success' | 'failed' | 'partial';
   storyCount: number;
+  dedupCount?: number; // Count of 7-day duplicate candidates filtered out
   errorMessage?: string;
   createdAt: string;
   updatedAt: string;
+  system?: NewsSystemType;
+  recoveryAttempts?: number;
+  failedAttempts?: number;
+  isSealed?: boolean;
+  lastRecoveredAt?: string;
 }
 
 /**
@@ -223,6 +237,7 @@ export interface NewsStory {
   sourceName: string;
   sourceUrl: string;
   sentimentType: 'constructive' | 'negative' | 'neutral';
+  dedupFingerprint?: string; // Canonical event signature
   createdAt: string;
 }
 

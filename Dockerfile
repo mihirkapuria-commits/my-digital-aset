@@ -25,6 +25,10 @@ COPY package*.json ./
 RUN npm ci --only=production --legacy-peer-deps || npm install --only=production --legacy-peer-deps
 
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/firebase-applet-config.json ./
+
+# Ensure persistent data directory exists and is writable by node user
+RUN mkdir -p /app/server/data && chown -R node:node /app
 
 # Non-root user for container security
 USER node

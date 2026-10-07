@@ -1805,15 +1805,34 @@ function scheduledNoonRemindersCycle() {
 }
 
 /**
- * Installs the two authoritative Stage 3A time-driven triggers.
+ * Daily Morning Reliability Watchdog Cycle Trigger Handler (~06:30 - 10:00 AM Asia/Kolkata)
+ * Calls Cloud Run with action: "reconcile_india" to detect missed packages,
+ * recover premature partial packages, and reconcile customer deliveries.
+ */
+function scheduledIndiaWatchdogCycle() {
+  console.log('[India Watchdog Cycle] Starting scheduled reliability reconciliation...');
+  var res = callCloudRunScheduler('reconcile_india');
+
+  if (!res || res.ok !== true) {
+    console.warn('[India Watchdog Cycle Warning] Reconciliation reported issue:', JSON.stringify(res));
+    return { ok: false, error: res ? res.error : 'Watchdog reconciliation failed' };
+  }
+
+  console.log('[India Watchdog Cycle Completed] Reconciliation completed.');
+  return { ok: true, data: res.data };
+}
+
+/**
+ * Installs the authoritative Stage 3 time-driven triggers.
  * Inspects existing triggers and removes any duplicates.
- * Guarantees exactly one scheduledMorningNewsCycle and one scheduledNoonRemindersCycle trigger.
+ * Guarantees scheduledMorningNewsCycle, scheduledNoonRemindersCycle, and scheduledIndiaWatchdogCycle.
  * Keeps legacy cronDailyDelivery dormant.
  */
 function installStage3ASchedulerTriggers() {
   var triggers = ScriptApp.getProjectTriggers();
   var morningInstalled = false;
   var noonInstalled = false;
+  var watchdogInstalled = false;
 
   for (var i = 0; i < triggers.length; i++) {
     var fnName = triggers[i].getHandlerFunction();
@@ -1826,6 +1845,12 @@ function installStage3ASchedulerTriggers() {
     } else if (fnName === 'scheduledNoonRemindersCycle') {
       if (!noonInstalled) {
         noonInstalled = true;
+      } else {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    } else if (fnName === 'scheduledIndiaWatchdogCycle') {
+      if (!watchdogInstalled) {
+        watchdogInstalled = true;
       } else {
         ScriptApp.deleteTrigger(triggers[i]);
       }
@@ -1855,11 +1880,22 @@ function installStage3ASchedulerTriggers() {
     console.log('[Trigger Setup] Created scheduledNoonRemindersCycle trigger at ~12:00 Asia/Kolkata.');
   }
 
+  if (!watchdogInstalled) {
+    ScriptApp.newTrigger('scheduledIndiaWatchdogCycle')
+      .timeBased()
+      .everyDays(1)
+      .atHour(7)
+      .inTimezone('Asia/Kolkata')
+      .create();
+    console.log('[Trigger Setup] Created scheduledIndiaWatchdogCycle trigger at ~07:00 Asia/Kolkata.');
+  }
+
   var finalTriggers = ScriptApp.getProjectTriggers().map(function(t) { return t.getHandlerFunction(); });
   return {
     ok: true,
     morningInstalled: true,
     noonInstalled: true,
+    watchdogInstalled: true,
     activeTriggers: finalTriggers
   };
 }

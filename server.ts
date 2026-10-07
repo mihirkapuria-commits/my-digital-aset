@@ -95,10 +95,35 @@ import {
   getDeliveryStatistics,
 } from './server/deliveryService.js';
 import {
+  generateIndiaTelegramConnectionToken,
+  connectIndiaTelegramAccount,
+  disconnectIndiaTelegramAccount,
+  processIndiaTelegramWebhookUpdate,
+  getIndiaTelegramAuditLogs,
+  getIndiaTelegramBotUsername,
+  isIndiaTelegramBotConfigured,
+  verifyIndiaTelegramWebhookSecret,
+  sendIndiaTelegramMessage,
+} from './server/indiaTelegramService.js';
+import {
+  deliverIndiaCategoryNewsToCustomer,
+  deliverDailyIndiaBriefingsToAllEligibleCustomers,
+  getIndiaDeliveryStatistics,
+} from './server/indiaDeliveryService.js';
+import {
+  SPECIALIST_CATEGORY_IDS,
+  generateSpecialistCategoryDailyNews,
+  generateDailyAllSpecialistNews,
+} from './server/specialistNewsService.js';
+import {
   startDailyScheduler,
   getSchedulerStatus,
   triggerManualSchedulerRun,
 } from './server/schedulerService.js';
+import {
+  runIndiaReliabilityWatchdog,
+  getIndiaReliabilityStatus,
+} from './server/indiaReliabilityService.js';
 import {
   getSheetSyncCheckpoint,
   executeFirestoreToSheetSync,
@@ -1002,6 +1027,101 @@ async function startServer() {
     }
   });
 
+  // ==========================================================================
+  // SYSTEM B: NEW INDIA NEWS TELEGRAM BOT ENDPOINTS
+  // ==========================================================================
+
+  /**
+   * POST /api/customer/telegram-india/token
+   * Generates single-use connection token for System B (India News Bot)
+   */
+  app.post('/api/customer/telegram-india/token', (req, res) => {
+    const sessionToken = getCustomerSessionToken(req);
+    if (!sessionToken) {
+      return res.status(401).json({ ok: false, error: 'Authentication required' });
+    }
+
+    const customer = getCustomerBySessionToken(sessionToken);
+    if (!customer) {
+      return res.status(401).json({ ok: false, error: 'Session expired' });
+    }
+
+    try {
+      const tokenData = generateIndiaTelegramConnectionToken(customer.customerId);
+      return res.json({
+        ok: true,
+        ...tokenData,
+        isConfigured: isIndiaTelegramBotConfigured(),
+      });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'Token generation failed' });
+    }
+  });
+
+  /**
+   * GET /api/customer/telegram-india/status
+   */
+  app.get('/api/customer/telegram-india/status', (req, res) => {
+    const sessionToken = getCustomerSessionToken(req);
+    if (!sessionToken) {
+      return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    }
+
+    const customer = getCustomerBySessionToken(sessionToken);
+    if (!customer) {
+      return res.status(401).json({ ok: false, error: 'Session expired' });
+    }
+
+    return res.json({
+      ok: true,
+      indiaTelegramConnected: Boolean(customer.indiaTelegramConnected),
+      isConfigured: isIndiaTelegramBotConfigured(),
+      botUsername: getIndiaTelegramBotUsername(),
+    });
+  });
+
+  /**
+   * POST /api/customer/telegram-india/disconnect
+   */
+  app.post('/api/customer/telegram-india/disconnect', (req, res) => {
+    const sessionToken = getCustomerSessionToken(req);
+    if (!sessionToken) {
+      return res.status(401).json({ ok: false, error: 'Authentication required' });
+    }
+
+    const customer = getCustomerBySessionToken(sessionToken);
+    if (!customer) {
+      return res.status(401).json({ ok: false, error: 'Session expired' });
+    }
+
+    const result = disconnectIndiaTelegramAccount(customer.customerId);
+    if (!result.success) {
+      return res.status(400).json({ ok: false, error: result.error });
+    }
+
+    return res.json({ ok: true, message: 'Disconnected from India News Bot' });
+  });
+
+  /**
+   * POST /api/telegram-india/webhook
+   * Public Webhook for System B India Bot
+   */
+  app.post('/api/telegram-india/webhook', async (req, res) => {
+    const secretHeader = req.headers['x-telegram-bot-api-secret-token'];
+    if (!verifyIndiaTelegramWebhookSecret(secretHeader as string | undefined)) {
+      return res.status(403).json({ ok: false, error: 'Unauthorized India webhook secret token' });
+    }
+
+    try {
+      const update = req.body;
+      const result = await processIndiaTelegramWebhookUpdate(update);
+      return res.json({ ok: true, handled: result.handled });
+    } catch (err: any) {
+      console.error('India Telegram webhook error:', err);
+      return res.json({ ok: false, error: 'India webhook processing error' });
+    }
+  });
+
   /**
    * GET /api/customer/briefings
    * Returns daily executive news packages for categories the authenticated customer is entitled to (Phase 5)
@@ -1690,6 +1810,125 @@ async function startServer() {
     const newsDate = typeof req.query.newsDate === 'string' ? req.query.newsDate : undefined;
     const stats = getDeliveryStatistics(newsDate);
     return res.json({ ok: true, ...stats });
+  });
+
+  // ==========================================================================
+  // SYSTEM B: NEW INDIA NEWS ADMIN CONTROLS
+  // ==========================================================================
+
+  /**
+   * GET /api/admin/india/status
+   * Returns complete health, category status, and bot state for System B
+   */
+  app.get('/api/admin/india/status', requireAdminAuth, (_req, res) => {
+    const db = getDb();
+    const indiaCats = db.categories.filter(
+      (c) => c.system === 'india' || INDIA_CATEGORY_IDS.includes(c.id as any)
+    );
+    return res.json({
+      ok: true,
+      system: 'SYSTEM B — NEW INDIA NEWS',
+      totalCategories: indiaCats.length,
+      activeCategoriesCount: indiaCats.filter((c) => c.isActive).length,
+      categories: indiaCats,
+      botConfigured: isIndiaTelegramBotConfigured(),
+      botUsername: getIndiaTelegramBotUsername(),
+    });
+  });
+
+  /**
+   * POST /api/admin/india/delivery/run
+   * Dispatches System B daily briefings via separate India Telegram bot
+   */
+  app.post('/api/admin/india/delivery/run', requireAdminAuth, async (req, res) => {
+    const { newsDate } = req.body || {};
+    const targetDate = newsDate || getKolkataDateString();
+
+    try {
+      const summary = await deliverDailyIndiaBriefingsToAllEligibleCustomers(targetDate);
+      return res.json({ ok: true, summary });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'India delivery run error' });
+    }
+  });
+
+  /**
+   * GET /api/admin/india/delivery/stats
+   */
+  app.get('/api/admin/india/delivery/stats', requireAdminAuth, (req, res) => {
+    const newsDate = typeof req.query.newsDate === 'string' ? req.query.newsDate : undefined;
+    const stats = getIndiaDeliveryStatistics(newsDate);
+    return res.json({ ok: true, ...stats });
+  });
+
+  /**
+   * GET /api/admin/india/reliability-status
+   * Stage 3 Reliability Hardening: System B health, partial package status, and recovery metrics
+   */
+  app.get('/api/admin/india/reliability-status', requireAdminAuth, (req, res) => {
+    const newsDate = typeof req.query.newsDate === 'string' ? req.query.newsDate : undefined;
+    const status = getIndiaReliabilityStatus(newsDate);
+    return res.json({ ok: true, status });
+  });
+
+  /**
+   * POST /api/admin/india/reconcile
+   * Triggers the System B watchdog reconciliation loop immediately
+   */
+  app.post('/api/admin/india/reconcile', requireSchedulerOrAdminAuth, async (req, res) => {
+    const { newsDate, forceRecoveryWindow } = req.body || {};
+    try {
+      const report = await runIndiaReliabilityWatchdog({ newsDate, forceRecoveryWindow });
+      return res.json({ ok: true, report });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'Reconciliation failed' });
+    }
+  });
+
+  // ==========================================================================
+  // SYSTEM A: SPECIALIST NEWS ADMIN CONTROLS
+  // ==========================================================================
+
+  /**
+   * GET /api/admin/specialist/status
+   */
+  app.get('/api/admin/specialist/status', requireAdminAuth, (_req, res) => {
+    const db = getDb();
+    const specCats = db.categories.filter(
+      (c) => c.system === 'specialist' || SPECIALIST_CATEGORY_IDS.includes(c.id as any)
+    );
+    return res.json({
+      ok: true,
+      system: 'SYSTEM A — EXISTING SPECIALIST NEWS',
+      totalCategories: specCats.length,
+      activeCategoriesCount: specCats.filter((c) => c.isActive).length,
+      categories: specCats,
+      botConfigured: isTelegramBotConfigured(),
+      botUsername: getTelegramBotUsername(),
+    });
+  });
+
+  /**
+   * POST /api/admin/specialist/news/generate
+   */
+  app.post('/api/admin/specialist/news/generate', requireAdminAuth, async (req, res) => {
+    const { categoryId, newsDate } = req.body || {};
+    const targetDate = newsDate || getKolkataDateString();
+
+    try {
+      if (categoryId) {
+        const result = await generateSpecialistCategoryDailyNews(categoryId, targetDate);
+        if (!result.success) {
+          return res.status(400).json({ ok: false, error: result.error });
+        }
+        return res.json({ ok: true, package: result.package, stories: result.stories });
+      }
+
+      const batchResult = await generateDailyAllSpecialistNews(targetDate);
+      return res.json({ ok: true, ...batchResult });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err.message || 'Specialist generation error' });
+    }
   });
 
   /**

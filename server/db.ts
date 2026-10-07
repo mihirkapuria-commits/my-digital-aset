@@ -49,10 +49,13 @@ export interface MyDigitAssetDatabase {
   subscriptionCategories: SubscriptionCategory[];
   categoryTransferAudits: CategoryTransferAudit[];
   telegramDeliveryLogs: TelegramDeliveryLog[];
+  indiaTelegramDeliveryLogs: TelegramDeliveryLog[];
   dailyNewsPackages: DailyNewsPackage[];
   newsStories: NewsStory[];
   telegramConnectionTokens: TelegramConnectionToken[];
+  indiaTelegramConnectionTokens: TelegramConnectionToken[];
   telegramConnectionAudits: TelegramConnectionAuditEvent[];
+  indiaTelegramConnectionAudits: TelegramConnectionAuditEvent[];
   categories: Category[];
 }
 
@@ -86,12 +89,29 @@ export function initDb(): MyDigitAssetDatabase {
         if (!Array.isArray(dbMemory.subscriptionCategories)) dbMemory.subscriptionCategories = [];
         if (!Array.isArray(dbMemory.categoryTransferAudits)) dbMemory.categoryTransferAudits = [];
         if (!Array.isArray(dbMemory.telegramDeliveryLogs)) dbMemory.telegramDeliveryLogs = [];
+        if (!Array.isArray(dbMemory.indiaTelegramDeliveryLogs)) dbMemory.indiaTelegramDeliveryLogs = [];
         if (!Array.isArray(dbMemory.dailyNewsPackages)) dbMemory.dailyNewsPackages = [];
         if (!Array.isArray(dbMemory.newsStories)) dbMemory.newsStories = [];
         if (!Array.isArray(dbMemory.telegramConnectionTokens)) dbMemory.telegramConnectionTokens = [];
+        if (!Array.isArray(dbMemory.indiaTelegramConnectionTokens)) dbMemory.indiaTelegramConnectionTokens = [];
         if (!Array.isArray(dbMemory.telegramConnectionAudits)) dbMemory.telegramConnectionAudits = [];
+        if (!Array.isArray(dbMemory.indiaTelegramConnectionAudits)) dbMemory.indiaTelegramConnectionAudits = [];
         if (!Array.isArray(dbMemory.categories) || dbMemory.categories.length === 0) {
-          dbMemory.categories = initialCategories;
+          dbMemory.categories = [...initialCategories];
+        } else {
+          // Ensure all initialCategories exist (e.g. newly defined specialist or India categories)
+          const existingIds = new Set(dbMemory.categories.map((c) => c.id));
+          for (const initCat of initialCategories) {
+            if (!existingIds.has(initCat.id)) {
+              dbMemory.categories.push({ ...initCat });
+            } else {
+              // Update system property if missing
+              const existing = dbMemory.categories.find((c) => c.id === initCat.id);
+              if (existing && !existing.system && initCat.system) {
+                existing.system = initCat.system;
+              }
+            }
+          }
         }
         return dbMemory;
       }
@@ -111,11 +131,14 @@ export function initDb(): MyDigitAssetDatabase {
     subscriptionCategories: [],
     categoryTransferAudits: [],
     telegramDeliveryLogs: [],
+    indiaTelegramDeliveryLogs: [],
     dailyNewsPackages: [],
     newsStories: [],
     telegramConnectionTokens: [],
+    indiaTelegramConnectionTokens: [],
     telegramConnectionAudits: [],
-    categories: initialCategories,
+    indiaTelegramConnectionAudits: [],
+    categories: [...initialCategories],
   };
 
   saveDb();
@@ -148,10 +171,13 @@ export async function loadDbFromFirestore(): Promise<MyDigitAssetDatabase> {
     subscriptionCategories,
     categoryTransferAudits,
     telegramDeliveryLogs,
+    indiaTelegramDeliveryLogs,
     dailyNewsPackages,
     newsStories,
     telegramConnectionTokens,
+    indiaTelegramConnectionTokens,
     telegramConnectionAudits,
+    indiaTelegramConnectionAudits,
     categories,
   ] = await Promise.all([
     loadCollection<Customer>('customers'),
@@ -162,14 +188,17 @@ export async function loadDbFromFirestore(): Promise<MyDigitAssetDatabase> {
     loadCollection<SubscriptionCategory>('subscriptionCategories'),
     loadCollection<CategoryTransferAudit>('categoryTransferAudits'),
     loadCollection<TelegramDeliveryLog>('telegramDeliveryLogs'),
+    loadCollection<TelegramDeliveryLog>('indiaTelegramDeliveryLogs'),
     loadCollection<DailyNewsPackage>('dailyNewsPackages'),
     loadCollection<NewsStory>('newsStories'),
     loadCollection<TelegramConnectionToken>('telegramConnectionTokens'),
+    loadCollection<TelegramConnectionToken>('indiaTelegramConnectionTokens'),
     loadCollection<TelegramConnectionAuditEvent>('telegramConnectionAudits'),
+    loadCollection<TelegramConnectionAuditEvent>('indiaTelegramConnectionAudits'),
     loadCollection<Category>('categories'),
   ]);
 
-  const currentDb = dbMemory || initDb();
+  const currentDb: MyDigitAssetDatabase = dbMemory || initDb();
 
   function mergeEntities<T extends Record<string, any>>(
     remote: T[],
@@ -222,6 +251,11 @@ export async function loadDbFromFirestore(): Promise<MyDigitAssetDatabase> {
       currentDb.telegramDeliveryLogs || [],
       (l) => l.deliveryId
     ),
+    indiaTelegramDeliveryLogs: mergeEntities(
+      indiaTelegramDeliveryLogs,
+      currentDb.indiaTelegramDeliveryLogs || [],
+      (l) => l.deliveryId
+    ),
     dailyNewsPackages: mergeEntities(dailyNewsPackages, currentDb.dailyNewsPackages || [], (p) => p.packageId),
     newsStories: mergeEntities(newsStories, currentDb.newsStories || [], (s) => s.storyId),
     telegramConnectionTokens: mergeEntities(
@@ -229,9 +263,19 @@ export async function loadDbFromFirestore(): Promise<MyDigitAssetDatabase> {
       currentDb.telegramConnectionTokens || [],
       (t) => t.token
     ),
+    indiaTelegramConnectionTokens: mergeEntities(
+      indiaTelegramConnectionTokens,
+      currentDb.indiaTelegramConnectionTokens || [],
+      (t) => t.token
+    ),
     telegramConnectionAudits: mergeEntities(
       telegramConnectionAudits,
       currentDb.telegramConnectionAudits || [],
+      (a) => a.eventId
+    ),
+    indiaTelegramConnectionAudits: mergeEntities(
+      indiaTelegramConnectionAudits,
+      currentDb.indiaTelegramConnectionAudits || [],
       (a) => a.eventId
     ),
     categories: mergedCategories.length > 0 ? mergedCategories : initialCategories,

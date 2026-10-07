@@ -56,9 +56,9 @@ export async function runStage3ATests() {
   initDb();
   const db = getDb();
 
-  // Reference test date: 2026-10-03 (Asia/Kolkata)
-  const testDate = '2026-10-03';
-  const refDate = new Date('2026-10-03T06:15:00.000Z');
+  // Reference test date: 2026-11-15 (Asia/Kolkata) - chosen outside the 7-day dedup window of historical sample data
+  const testDate = '2026-11-15';
+  const refDate = new Date('2026-11-15T06:15:00.000Z');
 
   // --- SUITE 1: ATOMIC CHECK-AND-RESERVE CONCURRENCY RACE ---
   console.log('--- SUITE 1: ATOMIC CHECK-AND-RESERVE CONCURRENCY PROTECTION ---');
@@ -98,14 +98,17 @@ export async function runStage3ATests() {
   // --- SUITE 2: CONCURRENT DAILY DELIVERY RACE (del_<newsDate>_<customerId>_<categoryId>) ---
   console.log('\n--- SUITE 2: CONCURRENT DAILY DELIVERY RACE PREVENTION ---');
 
-  // Ensure news package exists for testDate
+  // Ensure news package exists for testDate with success status
   let pkg = db.dailyNewsPackages.find(
-    (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate
+    (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate && p.generationStatus === 'success'
   );
   if (!pkg) {
+    db.dailyNewsPackages = db.dailyNewsPackages.filter(
+      (p) => !(p.categoryId === 'cat_india_startups' && p.newsDate === testDate)
+    );
     await generateCategoryDailyNews('cat_india_startups', testDate, { sourceProviderMode: 'mock' });
     pkg = db.dailyNewsPackages.find(
-      (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate
+      (p) => p.categoryId === 'cat_india_startups' && p.newsDate === testDate && p.generationStatus === 'success'
     );
   }
 
@@ -667,10 +670,10 @@ export async function runStage3ATests() {
   // Requirement C: Fewer than target number of stories available (e.g. 4 available) -> available stories delivered, zero manufactured
   const sparseFetch4Stories = async () => new Response(
     `<rss><channel>
-      <item><title><![CDATA[Available Story 1]]></title><link>https://economictimes.indiatimes.com/av-1</link><description><![CDATA[First genuine story from live source.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
-      <item><title><![CDATA[Available Story 2]]></title><link>https://economictimes.indiatimes.com/av-2</link><description><![CDATA[Second genuine story from live source.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
-      <item><title><![CDATA[Available Story 3]]></title><link>https://economictimes.indiatimes.com/av-3</link><description><![CDATA[Third genuine story from live source.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
-      <item><title><![CDATA[Available Story 4 Negative]]></title><link>https://economictimes.indiatimes.com/av-4</link><description><![CDATA[Regulatory penalty fine imposed on non-compliant vendor.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
+      <item><title><![CDATA[Infosys secures $150M cloud transformation deal with European logistics giant]]></title><link>https://economictimes.indiatimes.com/av-1</link><description><![CDATA[Infosys will modernize core supply chain infrastructure over five years.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
+      <item><title><![CDATA[Wipro launches cybersecurity defense hub in Hyderabad for BFSI clients]]></title><link>https://economictimes.indiatimes.com/av-2</link><description><![CDATA[The dedicated center focuses on zero-trust architectures and managed detection.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
+      <item><title><![CDATA[TCS partners with automotive OEM to deploy edge AI across manufacturing plants]]></title><link>https://economictimes.indiatimes.com/av-3</link><description><![CDATA[Real-time vision inspection will cut defect rates across assembly lines.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
+      <item><title><![CDATA[CERT-In issues critical advisory on zero-day vulnerability in enterprise VPN appliances]]></title><link>https://economictimes.indiatimes.com/av-4</link><description><![CDATA[Security agencies instruct immediate patching to prevent unauthorized network entry.]]></description><pubDate>${new Date().toUTCString()}</pubDate></item>
     </channel></rss>`,
     { status: 200 }
   );

@@ -7,6 +7,12 @@ import {
   getDeliveryStatistics,
 } from './deliveryService.js';
 import {
+  generateDailyAllSpecialistNews,
+} from './specialistNewsService.js';
+import {
+  deliverDailyIndiaBriefingsToAllEligibleCustomers,
+} from './indiaDeliveryService.js';
+import {
   sendDay3TrialReminder,
 } from './telegramService.js';
 import { getDb } from './db.js';
@@ -17,6 +23,12 @@ import {
   getPersistentSchedulerDates,
   setPersistentSchedulerDates,
 } from './schedulerLock.js';
+import {
+  runIndiaReliabilityWatchdog,
+  isWithinIndiaRecoveryWindow,
+  isIndiaMorningCatchUpEligible,
+  getIndiaReliabilityStatus,
+} from './indiaReliabilityService.js';
 
 const instanceId = process.env.K_REVISION || process.env.HOSTNAME || `runner_${Math.random().toString(36).substring(7)}`;
 
@@ -315,36 +327,86 @@ export async function evaluateAndRunDailySchedule(
       actionTaken = 'reminders_sent';
     }
 
-    // 2. MORNING NEWS & DELIVERY WINDOW (06:00 AM - 07:00 AM Asia/Kolkata)
-    const isMorningWindow = hour === 6;
+    // 2. MORNING NEWS & DELIVERY WINDOW (06:00 AM - 07:00 AM Asia/Kolkata for System A; 06:00 - 10:00 AM IST for System B)
+    const isSystemAMorningWindow = hour === 6;
 
-    if (isMorningWindow) {
-      const db = getDb();
-      const existingPackages = db.dailyNewsPackages.filter(
-        (p) => p.newsDate === kolkataDate && (p.generationStatus === 'success' || p.generationStatus === 'partial')
-      );
+    if (isSystemAMorningWindow) {
+      // ----------------------------------------------------------------------
+      // SYSTEM A: EXISTING SPECIALIST NEWS (Isolated execution: 06:00 - 07:00 IST)
+      // ----------------------------------------------------------------------
+      try {
+        if (state.lastGenerationDate !== kolkataDate) {
+          console.log(`[Scheduler 06:00 IST] [System A] Generating Specialist News for ${kolkataDate}...`);
+          const specGen = await generateDailyAllSpecialistNews(kolkataDate);
+          actions.push(`[System A Specialist] Generated ${specGen.totalStories} stories across ${specGen.successfulCategories} categories`);
+        }
 
-      // Generation Check (starts at 06:00 AM IST)
-      if (existingPackages.length < 10 && state.lastGenerationDate !== kolkataDate) {
-        console.log(`[Scheduler 06:00 IST] Starting automated daily news generation for ${kolkataDate}...`);
-        const genResult = await generateDailyAllCategoriesNews(kolkataDate);
-        state.lastGenerationDate = kolkataDate;
-        await setPersistentSchedulerDates({ lastGenerationDate: kolkataDate });
-        actions.push(`Generated ${genResult.totalStories} stories across ${genResult.successfulCategories} categories`);
-        actionTaken = actionTaken === 'reminders_sent' ? 'both' : 'generated_news';
+        if (minute >= 15 && state.lastDeliveryDate !== kolkataDate) {
+          console.log(`[Scheduler 06:15 IST] [System A] Dispatched Specialist Telegram Deliveries for ${kolkataDate}...`);
+          const specDel = await deliverDailyBriefingsToAllEligibleCustomers(kolkataDate, now);
+          actions.push(`[System A Specialist Deliveries] ${specDel.totalDeliveriesSent} sent, ${specDel.totalDeliveriesSkipped} skipped, ${specDel.totalDeliveriesFailed} failed`);
+        }
+      } catch (sysAErr: any) {
+        console.error('[System A Scheduler Error]:', sysAErr);
+        actions.push(`[System A Error] ${sysAErr.message}`);
+        // Continues cleanly to System B! Failure in System A does not halt System B.
+      }
+    }
+
+    // ----------------------------------------------------------------------
+    // SYSTEM B: NEW INDIA NEWS & RELIABILITY WATCHDOG (Isolated execution)
+    // ----------------------------------------------------------------------
+    try {
+      // 2A. Standard 06:00 AM morning generation
+      if (hour === 6 && state.lastGenerationDate !== kolkataDate) {
+        console.log(`[Scheduler 06:00 IST] [System B] Generating India News for ${kolkataDate}...`);
+        const indiaGen = await generateDailyAllCategoriesNews(kolkataDate);
+        actions.push(`[System B India] Generated ${indiaGen.totalStories} stories across ${indiaGen.successfulCategories} categories`);
       }
 
-      // Delivery Check (starts at 06:15 AM IST)
-      if (minute >= 15 && state.lastDeliveryDate !== kolkataDate) {
-        console.log(`[Scheduler 06:15 IST] Starting automated daily private Telegram delivery for ${kolkataDate}...`);
-        const delResult = await deliverDailyBriefingsToAllEligibleCustomers(kolkataDate, now);
-        state.lastDeliveryDate = kolkataDate;
-        await setPersistentSchedulerDates({ lastDeliveryDate: kolkataDate });
-        actions.push(
-          `Dispatched deliveries: ${delResult.totalDeliveriesSent} sent, ${delResult.totalDeliveriesSkipped} skipped, ${delResult.totalDeliveriesFailed} failed`
-        );
-        actionTaken = 'all';
+      // 2B. Standard 06:15 AM morning delivery
+      if (hour === 6 && minute >= 15 && state.lastDeliveryDate !== kolkataDate) {
+        console.log(`[Scheduler 06:15 IST] [System B] Dispatched India Telegram Deliveries for ${kolkataDate}...`);
+        const indiaDel = await deliverDailyIndiaBriefingsToAllEligibleCustomers(kolkataDate, now);
+        actions.push(`[System B India Deliveries] ${indiaDel.totalDeliveriesSent} sent, ${indiaDel.totalDeliveriesSkipped} skipped, ${indiaDel.totalDeliveriesFailed} failed`);
       }
+
+      // 2C. RELIABILITY HARDENING: Watchdog & Morning Catch-Up (06:30 - 10:00 IST or missed morning execution)
+      const inRecoveryWindow = isWithinIndiaRecoveryWindow(now);
+      const isCatchUp = isIndiaMorningCatchUpEligible(now, kolkataDate);
+
+      if (inRecoveryWindow || isCatchUp) {
+        const watchdogReport = await runIndiaReliabilityWatchdog({
+          newsDate: kolkataDate,
+          referenceDate: now,
+        });
+
+        if (
+          watchdogReport.summary.missingCategoriesRegenerated > 0 ||
+          watchdogReport.summary.partialCategoriesRecovered > 0 ||
+          watchdogReport.summary.deliveriesSent > 0
+        ) {
+          actions.push(
+            `[System B Watchdog] Reconciled: ${watchdogReport.summary.missingCategoriesRegenerated} missing generated, ${watchdogReport.summary.partialCategoriesRecovered} partial recovered, ${watchdogReport.summary.deliveriesSent} deliveries dispatched`
+          );
+        }
+      }
+    } catch (sysBErr: any) {
+      console.error('[System B Scheduler Error]:', sysBErr);
+      actions.push(`[System B Error] ${sysBErr.message}`);
+      // Continues cleanly! Failure in System B does not halt System A.
+    }
+
+    if (hour === 6 && state.lastGenerationDate !== kolkataDate) {
+      state.lastGenerationDate = kolkataDate;
+      await setPersistentSchedulerDates({ lastGenerationDate: kolkataDate });
+      actionTaken = actionTaken === 'reminders_sent' ? 'both' : 'generated_news';
+    }
+
+    if (hour === 6 && minute >= 15 && state.lastDeliveryDate !== kolkataDate) {
+      state.lastDeliveryDate = kolkataDate;
+      await setPersistentSchedulerDates({ lastDeliveryDate: kolkataDate });
+      actionTaken = 'all';
     }
   } catch (err: any) {
     console.error('[Scheduler Error]:', err);
@@ -406,18 +468,20 @@ export function getSchedulerStatus(): SchedulerState & {
  */
 export async function triggerManualSchedulerRun(
   targetDate?: string,
-  action: 'all' | 'generate' | 'deliver' | 'reminders' = 'all'
+  action: 'all' | 'generate' | 'deliver' | 'reminders' | 'reconcile_india' | 'reconcile' = 'all'
 ): Promise<{
   newsDate: string;
   action: string;
   generationResult?: any;
   deliveryResult?: any;
   reminderResult?: any;
+  watchdogResult?: any;
 }> {
   const newsDate = targetDate || getKolkataDateString();
   let generationResult: any = null;
   let deliveryResult: any = null;
   let reminderResult: any = null;
+  let watchdogResult: any = null;
 
   if (action === 'all' || action === 'generate') {
     generationResult = await generateDailyAllCategoriesNews(newsDate);
@@ -433,11 +497,16 @@ export async function triggerManualSchedulerRun(
     reminderResult = await evaluateAndSendDay3TrialReminders();
   }
 
+  if (action === 'all' || action === 'reconcile_india' || action === 'reconcile') {
+    watchdogResult = await runIndiaReliabilityWatchdog({ newsDate });
+  }
+
   return {
     newsDate,
     action,
     generationResult,
     deliveryResult,
     reminderResult,
+    watchdogResult,
   };
 }

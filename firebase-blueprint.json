@@ -163,6 +163,7 @@
         "categoryName": { "type": "string", "maxLength": 100 },
         "generationStatus": { "type": "string", "enum": ["pending", "success", "failed", "partial"] },
         "storyCount": { "type": "number" },
+        "dedupCount": { "type": "number" },
         "errorMessage": { "type": "string", "maxLength": 1000 },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
@@ -184,6 +185,7 @@
         "sourceName": { "type": "string", "maxLength": 200 },
         "sourceUrl": { "type": "string", "maxLength": 1000 },
         "sentimentType": { "type": "string", "enum": ["constructive", "negative", "neutral"] },
+        "dedupFingerprint": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string" }
       },
       "required": ["storyId", "packageId", "newsDate", "categoryId", "position", "headline", "summary", "sourceName", "sourceUrl", "sentimentType", "createdAt"]
