@@ -100,6 +100,20 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
   const [tgLinkExpired, setTgLinkExpired] = useState(false);
   const [tgError, setTgError] = useState<string | null>(null);
 
+  // India Telegram connection state (System B: India Edition)
+  const [indiaTgTokenData, setIndiaTgTokenData] = useState<{
+    deepLink: string;
+    expiresAt: string;
+    botUsername: string;
+    isConfigured: boolean;
+  } | null>(null);
+  const [isGeneratingIndiaTgToken, setIsGeneratingIndiaTgToken] = useState(false);
+  const [isCheckingIndiaTgStatus, setIsCheckingIndiaTgStatus] = useState(false);
+  const [isDisconnectingIndiaTg, setIsDisconnectingIndiaTg] = useState(false);
+  const [copiedIndiaTgLink, setCopiedIndiaTgLink] = useState(false);
+  const [indiaTgLinkExpired, setIndiaTgLinkExpired] = useState(false);
+  const [indiaTgError, setIndiaTgError] = useState<string | null>(null);
+
   // General state
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -149,6 +163,72 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
     return () => clearInterval(interval);
   }, [tgTokenData]);
 
+  // Check India token expiry timer
+  useEffect(() => {
+    if (!indiaTgTokenData?.expiresAt) {
+      setIndiaTgLinkExpired(false);
+      return;
+    }
+    const checkExpiry = () => {
+      const now = new Date().getTime();
+      const expiry = new Date(indiaTgTokenData.expiresAt).getTime();
+      if (now >= expiry) {
+        setIndiaTgLinkExpired(true);
+      }
+    };
+    checkExpiry();
+    const interval = setInterval(checkExpiry, 10000);
+    return () => clearInterval(interval);
+  }, [indiaTgTokenData]);
+
+  // India Telegram connection status polling & focus refresh
+  useEffect(() => {
+    if (!customer || !isOpen) return;
+
+    const checkIndiaStatus = async () => {
+      try {
+        const res = await fetch('/api/customer/telegram-india/status');
+        const data = await res.json();
+        if (data.ok && typeof data.indiaTelegramConnected === 'boolean') {
+          if (data.indiaTelegramConnected !== Boolean(customer.indiaTelegramConnected)) {
+            onCustomerUpdated({
+              ...customer,
+              indiaTelegramConnected: data.indiaTelegramConnected,
+            });
+            if (data.indiaTelegramConnected) {
+              setIndiaTgTokenData(null);
+              setSuccessMsg(`India Telegram connected successfully! Connected to @${data.botUsername || 'MyDigitAssetIndiaBot'}.`);
+            }
+          }
+        }
+      } catch (_) {
+        // Silently catch background poll errors
+      }
+    };
+
+    checkIndiaStatus();
+
+    let pollInterval: NodeJS.Timeout | null = null;
+    if (indiaTgTokenData && !customer.indiaTelegramConnected && !indiaTgLinkExpired) {
+      pollInterval = setInterval(checkIndiaStatus, 3500);
+    }
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkIndiaStatus();
+      }
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [customer, isOpen, indiaTgTokenData, indiaTgLinkExpired]);
+
   // Fetch safe subscription status, subscriptions, and payments
   const fetchSafeStatus = () => {
     if (!customer) return;
@@ -158,6 +238,20 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
         if (data && data.ok) {
           setSubStatusData(data);
           if (data.renewalRequested) setRenewalSubmitted(true);
+        }
+      })
+      .catch(() => {});
+
+    fetch('/api/customer/telegram-india/status')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.ok && typeof data.indiaTelegramConnected === 'boolean') {
+          if (customer && data.indiaTelegramConnected !== Boolean(customer.indiaTelegramConnected)) {
+            onCustomerUpdated({
+              ...customer,
+              indiaTelegramConnected: data.indiaTelegramConnected,
+            });
+          }
         }
       })
       .catch(() => {});
@@ -294,6 +388,8 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       // Continue cleanup on client
     } finally {
       onCustomerUpdated(null);
+      setTgTokenData(null);
+      setIndiaTgTokenData(null);
       setFullName('');
       setEmail('');
       setMobileNumber('');
@@ -368,6 +464,89 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
       setErrorMsg(err.message || 'Could not disconnect Telegram account.');
     } finally {
       setIsDisconnectingTg(false);
+    }
+  };
+
+  // Generate India Telegram connection token (System B: India Edition)
+  const handleGenerateIndiaTelegramToken = async () => {
+    setIsGeneratingIndiaTgToken(true);
+    setErrorMsg(null);
+    setIndiaTgError(null);
+    try {
+      const res = await fetch('/api/customer/telegram-india/token', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Could not initiate India Telegram connection. Please try again.');
+      }
+      setIndiaTgTokenData({
+        deepLink: data.deepLink,
+        expiresAt: data.expiresAt,
+        botUsername: data.botUsername || 'MyDigitAssetIndiaBot',
+        isConfigured: data.isConfigured !== false,
+      });
+      setIndiaTgLinkExpired(false);
+    } catch (err: any) {
+      setIndiaTgError(err.message || 'Something went wrong while connecting India Telegram. Please try again.');
+    } finally {
+      setIsGeneratingIndiaTgToken(false);
+    }
+  };
+
+  // Check India Telegram connection status manually
+  const handleCheckIndiaTelegramStatus = async () => {
+    setIsCheckingIndiaTgStatus(true);
+    setIndiaTgError(null);
+    try {
+      const res = await fetch('/api/customer/telegram-india/status');
+      const data = await res.json();
+      if (data.ok) {
+        if (customer) {
+          onCustomerUpdated({
+            ...customer,
+            indiaTelegramConnected: Boolean(data.indiaTelegramConnected),
+          });
+        }
+        if (data.indiaTelegramConnected) {
+          setSuccessMsg(`Connected to India News Bot (@${data.botUsername || 'MyDigitAssetIndiaBot'}) successfully!`);
+          setIndiaTgTokenData(null);
+          fetchSafeStatus();
+        } else {
+          setSuccessMsg('Waiting for connection. Please open Telegram and tap START.');
+        }
+      } else {
+        throw new Error(data.error || 'Could not verify status.');
+      }
+    } catch (err: any) {
+      setIndiaTgError(err.message || 'Unable to check India Telegram status. Please verify your connection.');
+    } finally {
+      setIsCheckingIndiaTgStatus(false);
+    }
+  };
+
+  // Disconnect from India Telegram
+  const handleDisconnectIndiaTelegram = async () => {
+    setIsDisconnectingIndiaTg(true);
+    setErrorMsg(null);
+    setIndiaTgError(null);
+    try {
+      const res = await fetch('/api/customer/telegram-india/disconnect', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.ok) {
+        throw new Error(data.error || 'Could not disconnect from India News Bot.');
+      }
+      setSuccessMsg('Disconnected from India News Bot.');
+      setIndiaTgTokenData(null);
+      if (customer) {
+        onCustomerUpdated({
+          ...customer,
+          indiaTelegramConnected: false,
+        });
+      }
+      fetchSafeStatus();
+    } catch (err: any) {
+      setIndiaTgError(err.message || 'Could not disconnect India Telegram account.');
+    } finally {
+      setIsDisconnectingIndiaTg(false);
     }
   };
 
@@ -617,6 +796,151 @@ export const CustomerModal: React.FC<CustomerModalProps> = ({
                     <p className="text-rose-800 text-[11px]">
                       Your subscription period has ended. Submit your renewal payment reference to resume receiving daily briefings.
                     </p>
+                  </div>
+                )}
+              </div>
+
+              {/* CONNECT TELEGRAM (INDIA) SECTION */}
+              <div className="border border-stone-200 rounded-xl p-4 space-y-3 bg-white">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-stone-900 block">Connect Telegram (India)</span>
+                    <span className="text-[11px] text-stone-500">
+                      Receive your subscribed India news briefings directly in your private Telegram chat.
+                    </span>
+                  </div>
+                  <div>
+                    {customer.indiaTelegramConnected ? (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> Connected
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200">
+                        <Send className="w-3.5 h-3.5 text-amber-600" /> Not Connected
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {indiaTgError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-800 text-[11px] p-2.5 rounded-lg flex items-start gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                    <span>{indiaTgError}</span>
+                  </div>
+                )}
+
+                {/* State A: India Telegram Connected */}
+                {customer.indiaTelegramConnected ? (
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-lg p-3 text-xs space-y-2">
+                    <p className="text-emerald-900 text-[11px] leading-relaxed">
+                      ✓ <strong>Connected to India News Bot:</strong> Your Telegram account is safely linked to{' '}
+                      <strong>@MyDigitAssetIndiaBot</strong>. Daily India news briefings will be delivered directly to your
+                      private Telegram chat every morning between 6:00 AM and 7:00 AM IST.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleDisconnectIndiaTelegram}
+                      disabled={isDisconnectingIndiaTg}
+                      className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-rose-700 hover:text-rose-800 hover:bg-rose-50 px-2.5 py-1 rounded border border-rose-200 transition cursor-pointer"
+                    >
+                      <Unlink className="w-3 h-3" />
+                      <span>{isDisconnectingIndiaTg ? 'Disconnecting...' : 'Disconnect India News Bot'}</span>
+                    </button>
+                  </div>
+                ) : (
+                  /* State B: India Telegram Not Connected or In-Progress */
+                  <div className="space-y-3">
+                    {!indiaTgTokenData ? (
+                      <div className="bg-stone-50 border border-stone-200 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <p className="text-[11px] text-stone-600 leading-snug">
+                          Receive your subscribed India news briefings directly in your private Telegram chat.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={handleGenerateIndiaTelegramToken}
+                          disabled={isGeneratingIndiaTgToken}
+                          className="bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs px-4 py-2 rounded-lg transition shrink-0 inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{isGeneratingIndiaTgToken ? 'Connecting...' : 'Connect Telegram'}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      /* Token Generated / Waiting for Connection State */
+                      <div className="bg-amber-50/80 border border-amber-200 rounded-lg p-3.5 text-xs space-y-3">
+                        <div className="flex items-center justify-between font-semibold text-amber-950">
+                          <span>Complete Your India Telegram Connection</span>
+                          <span className="text-[10px] text-amber-700 font-mono">
+                            {indiaTgLinkExpired ? 'Link Expired' : 'Valid for 15 mins'}
+                          </span>
+                        </div>
+
+                        {indiaTgLinkExpired ? (
+                          <div className="space-y-2">
+                            <p className="text-[11px] text-rose-700">
+                              Your Telegram connection link has expired. Please generate a fresh link to connect your account.
+                            </p>
+                            <button
+                              type="button"
+                              onClick={handleGenerateIndiaTelegramToken}
+                              disabled={isGeneratingIndiaTgToken}
+                              className="bg-stone-900 hover:bg-stone-800 text-white font-semibold text-xs px-3.5 py-2 rounded-lg transition cursor-pointer"
+                            >
+                              {isGeneratingIndiaTgToken ? 'Generating...' : 'Generate New Link'}
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="text-[11px] text-stone-700 space-y-1 leading-relaxed">
+                              <p>
+                                1. Tap the button below to open our official India bot:{' '}
+                                <strong>@{indiaTgTokenData.botUsername || 'MyDigitAssetIndiaBot'}</strong>
+                              </p>
+                              <p>2. Tap <strong>START</strong> in Telegram to securely complete the connection.</p>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                              <a
+                                href={indiaTgTokenData.deepLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="bg-sky-600 hover:bg-sky-700 text-white font-semibold text-xs px-4 py-2 rounded-lg transition text-center inline-flex items-center justify-center gap-1.5"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>Open Telegram & Tap START</span>
+                              </a>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(indiaTgTokenData.deepLink);
+                                  setCopiedIndiaTgLink(true);
+                                  setTimeout(() => setCopiedIndiaTgLink(false), 2000);
+                                }}
+                                className="bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 font-semibold text-xs px-3 py-2 rounded-lg transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                {copiedIndiaTgLink ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                                <span>{copiedIndiaTgLink ? 'Link Copied' : 'Copy Link'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={handleCheckIndiaTelegramStatus}
+                                disabled={isCheckingIndiaTgStatus}
+                                className="bg-white hover:bg-stone-100 text-stone-800 border border-stone-300 font-semibold text-xs px-3 py-2 rounded-lg transition inline-flex items-center justify-center gap-1.5 cursor-pointer"
+                              >
+                                <RefreshCw className={`w-3.5 h-3.5 ${isCheckingIndiaTgStatus ? 'animate-spin' : ''}`} />
+                                <span>{isCheckingIndiaTgStatus ? 'Checking...' : 'Check Status'}</span>
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

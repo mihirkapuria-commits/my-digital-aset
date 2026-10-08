@@ -582,6 +582,8 @@ export function registerOrLoginCustomer(input: {
       mobileNumber: input.mobileNumber,
       telegramChatId: null,
       telegramConnected: false,
+      indiaTelegramChatId: null,
+      indiaTelegramConnected: false,
       accountStatus: 'active',
       trialStartDate: now,
       trialEndDate: trialEnd,
